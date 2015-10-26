@@ -97,6 +97,8 @@ void loadDataAccess(string filename, int numThreads, int numBatches, vector<vect
 
 void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector<double> > data, vector<vector<long> > dataCols, vector<vector<vector<long> > > examples, vector<SparseVector<double>*>& row_pointers_all, vector<long>& batchNumRows, vector <long>& batchNumCols, vector<long>& batchNumElems){
 
+  long noopDensity = 10;
+
   for (int ibatch=0; ibatch < numBatches; ibatch++){
     long nrows = 0;
     long ncols = nfeat+1;
@@ -119,34 +121,36 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
       numa_run_on_node(ithread);
       numa_set_localalloc();
 
-      double* noopContent = new double[1];
-      long*   noopCols    = new long[1];
-      noopCols[0] = nfeat;
-
-      for (int iexp=0; iexp < examples[ibatch][ithread].size(); iexp++){
-        // Copy examples into row_pointers
-        long length = data[examples[ibatch][ithread][iexp]].size();
+      for (int iexp = 0; iexp < examples[ibatch][ithread].size(); iexp++){
+        long expID = examples[ibatch][ithread][iexp];
+        long length = data[expID].size();
         double* content = new double[length + 1];
-        long*   cols    = new long[length + 1];
-        for (int ii=0; ii < length; ii++){
-          content[ii] = data[    examples[ibatch][ithread][iexp]][ii];
-          cols[ii]    = dataCols[examples[ibatch][ithread][iexp]][ii];
+        long* cols = new long[length + 1];
+        for (int ii = 0; ii < length; ii++){
+          content[ii] = data[expID][ii];
+          cols[ii]    = dataCols[expID][ii];
+          nelems++;
         }
         content[length] = drand48() > 0.8 ? 0 : 1.0;
         cols[length] = nfeat;
-        nelems += length+1;
-        // cout << "writing batch " << ibatch << " example " << nrows << " of " << nexp << endl;
+        nelems++;
         row_pointers[nrows++] = SparseVector<double>(content, cols, length+1);
       }
+
       for (int iexp = examples[ibatch][ithread].size(); iexp < maxCount; iexp++){
-        // noops
-        noopContent[0] = drand48() > 0.8 ? 0 : 1.0;
-        noopCols[0] = nfeat;
-        nelems += 1;
-        // cout << "writing batch " << ibatch << " example " << nrows << " of " << nexp << endl;
-        row_pointers[nrows++] = SparseVector<double>(noopContent, noopCols, 1);
+        long length = 0;
+        double* content = new double[length + 1];
+        long* cols = new long[length + 1];
+        content[length] = drand48() > 0.8 ? 0 : 1.0;
+        cols[length] = nfeat;
+        nelems++;
+        row_pointers[nrows++] = SparseVector<double>(content, cols, length+1);
       }
+
     }
+
+    // Sanity check that nrows = nexp
+    if (nrows != nexp) cout << "nrows = " << nrows << ", nexp = " << nexp << endl;
 
     row_pointers_all.push_back(row_pointers);
     batchNumRows.push_back(nrows);
@@ -164,11 +168,12 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
  * and test/glm_sparse.cc, and the documented code in 
  * app/glm_dense_sgd.h
  */
-int main_dataaccess(int argc, char** argv){
+// int main_dataaccess(int argc, char** argv){
+int main(int argc, char** argv){
   int numEpochs = 1;
   int numBatches = 100;
   int numThreads = 8;
-  int nFeat = 10000;
+  int nfeat = 100000;
 
   vector<vector<double> > data;
   vector<vector<long  > > dataCols;
@@ -178,7 +183,7 @@ int main_dataaccess(int argc, char** argv){
 
   loadData("/Users/xinghao/Documents/research/cyclades/scala/logs/dataaccess_data_multinomialLogisticRegression.txt", data, dataCols);
   loadDataAccess("/Users/xinghao/Documents/research/cyclades/scala/logs/dataaccess_nthreads8_multinomialLogisticRegression.txt", numThreads, numBatches, examples);
-  allocateDataToNUMA(numBatches, numThreads, nFeat, data, dataCols, examples, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+  allocateDataToNUMA(numBatches, numThreads, nfeat, data, dataCols, examples, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
 
   if (false){
     cout << row_pointers_all.size() << " / " << numBatches << endl;
@@ -194,44 +199,57 @@ int main_dataaccess(int argc, char** argv){
   }
 
   double rs = 0.0;
-  rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nFeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+  rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nfeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
   std::cout << "SUM OF MODEL (Should be ~1.3-1.4): " << rs << std::endl;
   return 0;
 }
 
+void allocateSyntheticData(int numBatches, int numThreads, int nfeat, int density, int numExamplesPerBatchPerThread, vector<SparseVector<double>*>& row_pointers_all, vector<long>& batchNumRows, vector <long>& batchNumCols, vector<long>& batchNumElems){
+  for (int ibatch=0; ibatch < numBatches; ibatch++){
+    SparseVector<double>* row_pointers = (SparseVector<double>*) ::operator new(numExamplesPerBatchPerThread * numThreads * sizeof(SparseVector<double>));
+    int nrows = 0;
+    int nelems = 0;
+    for (int ithread = 0; ithread < numThreads; ithread++){
+      numa_run_on_node(ithread);
+      numa_set_localalloc();
+      for (int iexp = 0; iexp < numExamplesPerBatchPerThread; iexp++){
+        double* content = new double[density + 1];
+        long*   cols    = new long[density + 1];
+        for (int idensity = 0; idensity < density; idensity++){
+          cols[idensity] = (int)(drand48() * nfeat);
+          content[idensity] = drand48();
+          nelems ++;
+        }
+        cols[density] = nfeat;
+        content[density] = drand48() > 0.8 ? 0 : 1;
+        nelems++;
+        row_pointers[nrows++] = SparseVector<double>(content, cols, density+1);
+      }
+    }
+    row_pointers_all.push_back(row_pointers);
+    batchNumRows.push_back(nrows);
+    batchNumCols.push_back(nfeat+1);
+    batchNumElems.push_back(nelems);
+  }
+}
 
-int main(int argc, char** argv){
+int main_synthetic(int argc, char** argv){
+// int main(int argc, char** argv){
   int numEpochs = 1;
   int numBatches = 100;
-  int numExamplesPerBatch = 80;
+  int numExamplesPerBatchPerThread = 200;
   int numThreads = 8;
-  int nFeat = 10;
+  int nfeat = 10000;
   int density = 10;
 
   vector<long> batchNumRows, batchNumCols, batchNumElems;
   vector<SparseVector<double>*> row_pointers_all;
 
-  for (int ibatch=0; ibatch < numBatches; ibatch++){
-    SparseVector<double>* row_pointers = (SparseVector<double>*) ::operator new(numExamplesPerBatch * sizeof(SparseVector<double>));
-    for (int iexp = 0; iexp < numExamplesPerBatch; iexp++){
-      double* content = new double[density + 1];
-      long*   cols    = new long[density + 1];
-      for (int idensity = 0; idensity < density; idensity++){
-        cols[idensity] = (int)(drand48() * nFeat);
-        content[cols[idensity]] = drand48();
-      }
-      cols[density] = nFeat;
-      content[cols[density]] = drand48() > 0.8 ? 0 : 1;
-      row_pointers[iexp] = SparseVector<double>(content, cols, density+1);
-    }
-    row_pointers_all.push_back(row_pointers);
-    batchNumRows.push_back(numExamplesPerBatch);
-    batchNumCols.push_back(nFeat+1);
-    batchNumElems.push_back(numExamplesPerBatch * (nFeat+1));
-  }
+  allocateSyntheticData(numBatches, numThreads, nfeat, density, numExamplesPerBatchPerThread, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+
 
   double rs = 0.0;
-  rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nFeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+  rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nfeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
   std::cout << "SUM OF MODEL (Should be ~1.3-1.4): " << rs << std::endl;
   return 0;
 

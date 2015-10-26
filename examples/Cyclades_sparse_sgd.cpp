@@ -123,7 +123,7 @@ double test_cyc_sparse_sgd(long nepoch, long nbatches, long numThreads, long nfe
     //    - DW_ROW: Access method
     //
     SparseDimmWitted<double, CYCModelExample_Sparse, MODELREPL, DATAREPL, DW_ACCESS_ROW> *
-      dw = new SparseDimmWitted<double, CYCModelExample_Sparse, MODELREPL, DATAREPL, DW_ACCESS_ROW> (row_pointers_all[ibatch], batchNumRows[ibatch], batchNumCols[ibatch], batchNumElems[ibatch], &model);
+      dw = new SparseDimmWitted<double, CYCModelExample_Sparse, MODELREPL, DATAREPL, DW_ACCESS_ROW> (row_pointers_all[ibatch], batchNumRows[ibatch], nfeat+1, batchNumElems[ibatch], &model);
     unsigned int f_handle_grad = dw->register_row(f_lr_grad_sparse);
     unsigned int f_handle_loss = dw->register_row(f_lr_loss_sparse);
     dw->register_model_avg(f_handle_grad, f_lr_modelavg);
@@ -131,6 +131,13 @@ double test_cyc_sparse_sgd(long nepoch, long nbatches, long numThreads, long nfe
     dwEngines[ibatch] = dw;
     f_handle_grads[ibatch] = f_handle_grad;
     f_handle_losss[ibatch] = f_handle_loss;
+
+    // Sanity check that we have the right number of elements
+    int nelems = 0;
+    for (int i = 0; i < batchNumRows[ibatch]; i++){
+      nelems += row_pointers_all[ibatch][i].n;
+    }
+    if (nelems != batchNumElems[ibatch]) std::cout << "batchNumElems[" << ibatch << "] = " << batchNumElems[ibatch] << " != nelems = " << nelems << std::endl;
   }
 
   double l2sum = 0.0;
