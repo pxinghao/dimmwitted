@@ -1,5 +1,9 @@
 .DS_Store
 
+# Compiled examples
+example
+example_cyclades
+
 # Compiled Object files
 *.slo
 *.lo
