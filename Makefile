@@ -28,6 +28,9 @@ CPP_LAST =
 
 endif
 
+exp_cyc:
+	$(CXX) $(CPP_FLAG) $(CPP_INCLUDE) examples/example_cyclades.cpp -o example_cyclades $(CPP_LAST)
+
 exp:
 	$(CXX) $(CPP_FLAG) $(CPP_INCLUDE) examples/example.cpp -o example $(CPP_LAST)
 
