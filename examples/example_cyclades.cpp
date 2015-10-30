@@ -181,8 +181,8 @@ int main(int argc, char** argv){
   vector<long> batchNumRows, batchNumCols, batchNumElems;
   vector<SparseVector<double>*> row_pointers_all;
 
-  loadData("/Users/xinghao/Documents/research/cyclades/scala/logs/dataaccess_data_multinomialLogisticRegression.txt", data, dataCols);
-  loadDataAccess("/Users/xinghao/Documents/research/cyclades/scala/logs/dataaccess_nthreads8_multinomialLogisticRegression.txt", numThreads, numBatches, examples);
+  loadData("data/dataaccess_data_multinomialLogisticRegression.txt", data, dataCols);
+  loadDataAccess("data/dataaccess_nthreads8_multinomialLogisticRegression.txt", numThreads, numBatches, examples);
   allocateDataToNUMA(numBatches, numThreads, nfeat, data, dataCols, examples, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
 
   if (false){
