@@ -50,43 +50,44 @@ void loadDataAccess(string filename, int numThreads, int numBatches, vector<vect
     vector<vector<long> > examplesByBatch;
 
     for (int threadID = 0; threadID < numThreads; threadID++){
-      vector<long> examplesByBatchThread;
 
-      getline(dataAccessFile, line);
+      if (getline(dataAccessFile, line)){
 
-      size_t matchPos = -1;
-      size_t startPos = -1;
-      long num = 0;
+        vector<long> examplesByBatchThread;
+        size_t matchPos = -1;
+        size_t startPos = -1;
+        long num = 0;
 
-      startPos = matchPos + 1;
-      matchPos = line.find('\t', startPos);
-      num = stoi(line.substr(startPos, matchPos - startPos));
-      // Sanity check
-      if (num != batchID){
-        cerr << "ERROR: read batchID as " << num << " but expected " << batchID << endl;
-      }
-
-      startPos = matchPos + 1;
-      matchPos = line.find('\t', startPos);
-      num = stoi(line.substr(startPos, matchPos - startPos));
-      // Sanity check
-      if (num != threadID){
-        cerr << "ERROR: read threadID as " << num << " but expected " << threadID << endl;
-      }
-
-      // Read examples
-      while (true){
         startPos = matchPos + 1;
         matchPos = line.find('\t', startPos);
-        if (matchPos != string::npos){
-          num = stoi(line.substr(startPos, matchPos - startPos));
-          examplesByBatchThread.push_back(num);
-        }else{
-          break;
+        num = stoi(line.substr(startPos, matchPos - startPos));
+        // Sanity check
+        if (num != batchID){
+          cerr << "ERROR: read batchID as " << num << " but expected " << batchID << endl;
         }
-      }
 
-      examplesByBatch.push_back(examplesByBatchThread);
+        startPos = matchPos + 1;
+        matchPos = line.find('\t', startPos);
+        num = stoi(line.substr(startPos, matchPos - startPos));
+        // Sanity check
+        if (num != threadID){
+          cerr << "ERROR: read threadID as " << num << " but expected " << threadID << endl;
+        }
+
+        // Read examples
+        while (true){
+          startPos = matchPos + 1;
+          matchPos = line.find('\t', startPos);
+          if (matchPos != string::npos){
+            num = stoi(line.substr(startPos, matchPos - startPos));
+            examplesByBatchThread.push_back(num);
+          }else{
+            break;
+          }
+        }
+
+        examplesByBatch.push_back(examplesByBatchThread);
+      }
     }
 
     examples.push_back(examplesByBatch);
@@ -171,9 +172,9 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
 // int main_dataaccess(int argc, char** argv){
 int main(int argc, char** argv){
   int numEpochs = 1;
-  int numBatches = 1000;
+  int numBatches = 400;
   int numThreads = 8;
-  int nfeat = 100000;
+  int nfeat = 1000000;
 
   vector<vector<double> > data;
   vector<vector<long  > > dataCols;
