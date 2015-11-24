@@ -1,5 +1,6 @@
 #include <vector>
 #include <fstream>
+#include <algorithm>
 
 #include "Cyclades_sparse_sgd.cpp"
 
@@ -95,9 +96,11 @@ void loadDataAccess(string filename, int numThreads, int numBatches, vector<vect
   dataAccessFile.close();
 }
 
-void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector<double> > data, vector<vector<long> > dataCols, vector<vector<vector<long> > > examples, vector<SparseVector<double>*>& row_pointers_all, vector<long>& batchNumRows, vector <long>& batchNumCols, vector<long>& batchNumElems){
+std::vector<SparseVector<double>*> allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector<double> > data, vector<vector<long> > dataCols, vector<vector<vector<long> > > examples, vector<SparseVector<double>*>& row_pointers_all, vector<long>& batchNumRows, vector <long>& batchNumCols, vector<long>& batchNumElems){
 
   long noopDensity = 10;
+
+  std::vector<SparseVector<double>*> allpointers;
 
   for (int ibatch=0; ibatch < numBatches; ibatch++){
     long nrows = 0;
@@ -135,6 +138,7 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
         cols[length] = nfeat;
         nelems++;
         row_pointers[nrows++] = SparseVector<double>(content, cols, length+1);
+        allpointers.push_back(&row_pointers[nrows-1]);
       }
 
       for (int iexp = examples[ibatch][ithread].size(); iexp < maxCount; iexp++){
@@ -145,6 +149,7 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
         cols[length] = nfeat;
         nelems++;
         row_pointers[nrows++] = SparseVector<double>(content, cols, length+1);
+        allpointers.push_back(&row_pointers[nrows-1]);
       }
 
     }
@@ -157,6 +162,7 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
     batchNumCols.push_back(ncols);
     batchNumElems.push_back(nelems);
   }
+  return allpointers;
 
 }
 
@@ -170,7 +176,11 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
  */
 // int main_dataaccess(int argc, char** argv){
 int main(int argc, char** argv){
-  int numEpochs = 1;
+
+
+  bool ISDW = false;
+
+  int numEpochs = 10;
   int numBatches = 1000;
   int numThreads = 8;
   int nfeat = 100000;
@@ -183,7 +193,8 @@ int main(int argc, char** argv){
 
   loadData("data/dataaccess_data_multinomialLogisticRegression.txt", data, dataCols);
   loadDataAccess("data/dataaccess_nthreads8_multinomialLogisticRegression.txt", numThreads, numBatches, examples);
-  allocateDataToNUMA(numBatches, numThreads, nfeat, data, dataCols, examples, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+  std::vector<SparseVector<double>*> allpointers = 
+    allocateDataToNUMA(numBatches, numThreads, nfeat, data, dataCols, examples, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
 
   if (false){
     cout << row_pointers_all.size() << " / " << numBatches << endl;
@@ -198,10 +209,34 @@ int main(int argc, char** argv){
     }
   }
 
-  double rs = 0.0;
-  rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nfeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
-  std::cout << "SUM OF MODEL (Should be ~1.3-1.4): " << rs << std::endl;
-  return 0;
+
+  if(ISDW){
+    SparseVector<double>* allrowpointers = 
+      (SparseVector<double>*) ::operator new(allpointers.size() * sizeof(SparseVector<double>));
+    std::cout << allpointers.size() << std::endl;
+    for(int i=0;i<allpointers.size();i++){
+      allrowpointers[i] = SparseVector<double>(allpointers[i]->p, allpointers[i]->idxs, allpointers[i]->n);
+    }
+    random_shuffle(&allrowpointers[0],&allrowpointers[allpointers.size()]);
+    std::cout << "Shuffled" << std::endl;
+
+    int nelem = 0;
+    for(int i=0;i<batchNumElems.size();i++){
+    nelem += batchNumElems[i];
+    }
+    std::cout << "NELEM " << nelem << std::endl;
+
+    double rs = test_cyc_sparse_sgd_hogwild<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>
+      (numEpochs, numBatches, numThreads, nfeat, allrowpointers, allpointers.size(), nelem);
+    std::cout << "SUM OF MODEL (Should be ~1.3-1.4): " << rs << std::endl;
+    return 0;    
+
+  }else{
+    double rs = 0.0;
+    rs = test_cyc_sparse_sgd<DW_MODELREPL_PERMACHINE, DW_DATAREPL_SHARDING>(numEpochs, numBatches, numThreads, nfeat, row_pointers_all, batchNumRows, batchNumCols, batchNumElems);
+    std::cout << "SUM OF MODEL (Should be ~1.3-1.4): " << rs << std::endl;
+    return 0;    
+  }
 }
 
 void allocateSyntheticData(int numBatches, int numThreads, int nfeat, int density, int numExamplesPerBatchPerThread, vector<SparseVector<double>*>& row_pointers_all, vector<long>& batchNumRows, vector <long>& batchNumCols, vector<long>& batchNumElems){
