@@ -172,7 +172,7 @@ void allocateDataToNUMA(int numBatches, int numThreads, int nfeat, vector<vector
 // int main_dataaccess(int argc, char** argv){
 int main(int argc, char** argv){
   int numEpochs = 1;
-  int numBatches = 400;
+  int numBatches = 2000;
   int numThreads = 8;
   int nfeat = 1000000;
 
