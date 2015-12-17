@@ -181,8 +181,7 @@ int main(int argc, char** argv){
   bool ISDW = false;
 
   int numEpochs = 1;
-  int numBatches = 400;
-
+  int numBatches = 2000;
   int numThreads = 8;
   int nfeat = 1000000;
 
