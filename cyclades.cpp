@@ -21,25 +21,17 @@ void _do(int * data, int* nelems, int * indices, int ** myindices, int * nelem, 
 
     thread_batch_on[thread_id] = batch;    
 
-    /*for (int i = 0; i < 8; i++) {
-      cout << thread_batch_on[i] << " ";
-    }
-    cout << endl;
-    std::cout << "THREAD: " << thread_id << " STARTING BATCH " << batch << std::endl;*/
-
     int waiting_for_other_threads = 1;
     while (waiting_for_other_threads) {
       waiting_for_other_threads = 0;
       for (int ii = 0; ii < 8; ii++) {
 	if (thread_batch_on[ii] < batch) {
-	  //if (thread_id == 1) std::cout << "I'M ON BATCH " << batch << " WAITING ON " << thread_batch_on[ii] << " OF " << ii << std::endl;
 	  waiting_for_other_threads = 1;
 	  break;
 	}
       }
     }
     
-    //std::cout << "THREAD: " << thread_id << " ON BATCH " << batch << std::endl;
     unsigned short p_rand_seed[3];
     p_rand_seed[0] = rand();
     p_rand_seed[1] = rand();
@@ -47,7 +39,6 @@ void _do(int * data, int* nelems, int * indices, int ** myindices, int * nelem, 
     
     for(int iid=0;iid<nelem[batch];iid++){
       int eid = myindices[batch][iid];
-      //int nelem = nelems[eid];
       int k = nelems[eid];
       int nstart = indices[eid];
       
@@ -131,9 +122,7 @@ int main(int argc, char ** argv){
   for(int ithread=0;ithread<NTHREAD;ithread++){
     numa_run_on_node(ithread / (NTHREAD / 2));
     numa_set_localalloc();
-    //std::cout << ithread << "~" << NELEMS[ithread] << std::endl;
     for (int i = 0; i < n_batches; i++) {
-      //numa_aware_indices[i][ithread] = new int[NELEMS[i][ithread]];
       numa_aware_indices[i][ithread] = (int *)numa_alloc_onnode(NELEMS[i][ithread] * sizeof(int), ithread % 2);
     }
   }
