@@ -6,6 +6,7 @@
 #include <thread>
 #include <algorithm> 
 #include <math.h>
+#include <time.h>
 
 #include <unistd.h>
 
@@ -23,15 +24,17 @@ using namespace std;
 #define CYC_NO_SYNC 0
 #endif
 
-#define NTHREAD 8
+#define VALUE_RANGE 10
+#define GAMMA .00001
+#define NTHREAD 16
 #define MODEL_SIZE 1000000
 #define DATA_FILE "data/dataaccess_data_multinomialLogisticRegression.txt"
-#define DATA_ACCESS_FILE "data/dataaccess_nthreads8_multinomialLogisticRegression.txt"
+#define DATA_ACCESS_FILE "data/dataaccess_nthreads16_multinomialLogisticRegression.txt"
 
-int models[MODEL_SIZE];
+double models[MODEL_SIZE];
 int volatile thread_batch_on[NTHREAD];
 
-void _do(int * data, int* nelems, int * indices, int * myindices, int nelem, int thread_id){
+void _do_simulation(int * data, int* nelems, int * indices, int * myindices, int nelem, int thread_id){
   
   unsigned short p_rand_seed[3];
   p_rand_seed[0] = rand();
@@ -44,7 +47,7 @@ void _do(int * data, int* nelems, int * indices, int * myindices, int nelem, int
     int nelem = nelems[eid];
     int nstart = indices[eid];
 
-    float a = 0.0;
+    double a = 0.0;
     for(int i=0;i<GRAD_COST;i++){
       a += erand48(p_rand_seed);
     }
@@ -52,11 +55,10 @@ void _do(int * data, int* nelems, int * indices, int * myindices, int nelem, int
     for(int j=nstart;j<nstart+nelem;j++){
       models[data[j]] += a;
     }
-
   }
 }
 
-void _do_cyclades(int * data, int* nelems, int * indices, int ** myindices, int * nelem, int thread_id, int n_batches){
+void _do_cyclades_gradient(double **sparse_mat, double *target, int *data, int* nelems, int * indices, int ** myindices, int * nelem, int thread_id, int n_batches){
   
   for (int batch = 0; batch < n_batches; batch++) {
 
@@ -65,7 +67,44 @@ void _do_cyclades(int * data, int* nelems, int * indices, int ** myindices, int 
     int waiting_for_other_threads = 1;
     while (waiting_for_other_threads) {
       waiting_for_other_threads = 0;
-      for (int ii = 0; ii < 8; ii++) {
+      for (int ii = 0; ii < NTHREAD; ii++) {
+	if (thread_batch_on[ii] < batch) {
+	  waiting_for_other_threads = 1;
+	  break;
+	}
+      }
+    }
+    
+    for(int iid = 0; iid < nelem[batch]; iid++){
+      int eid = myindices[batch][iid];
+      int dim = nelems[eid];
+      int nstart = indices[eid];
+      
+      //Compute gradient
+      double gradient = 0;
+      for (int i = 0; i < dim; i++) {
+	gradient += sparse_mat[eid][i] * models[data[nstart + i]];
+      }
+      gradient -= target[eid];
+      
+      //Apply gradient
+      for(int i = nstart; i < nstart+dim; i++){
+	models[data[i]] = models[data[i]] - GAMMA * sparse_mat[eid][i-nstart] * gradient;
+      }
+    }
+  }
+}
+
+void _do_cyclades_simulation(int *data, int* nelems, int * indices, int ** myindices, int * nelem, int thread_id, int n_batches){
+  
+  for (int batch = 0; batch < n_batches; batch++) {
+
+    //Wait for all threads to be on the same batch
+    thread_batch_on[thread_id] = batch;    
+    int waiting_for_other_threads = 1;
+    while (waiting_for_other_threads) {
+      waiting_for_other_threads = 0;
+      for (int ii = 0; ii < NTHREAD; ii++) {
 	if (thread_batch_on[ii] < batch) {
 	  waiting_for_other_threads = 1;
 	  break;
@@ -83,7 +122,7 @@ void _do_cyclades(int * data, int* nelems, int * indices, int ** myindices, int 
       int k = nelems[eid];
       int nstart = indices[eid];
       
-      float a = 0.0;
+      double a = 0.0;
       for(int i=0;i<GRAD_COST;i++){
 	a += erand48(p_rand_seed);
       }
@@ -93,6 +132,23 @@ void _do_cyclades(int * data, int* nelems, int * indices, int ** myindices, int 
       }
     }
   }
+}
+
+double compute_loss(double **sparse_mat, double *target_dat, int *data, int *indices, vector<int> &p_nelems) {
+
+  double loss = 0;
+  for (int i = 0; i < p_nelems.size(); i++) {
+    int nstart = indices[i];
+    
+    //Calculate prediction
+    double prediction = 0;
+    for (int j = 0; j < p_nelems[i]; j++) {
+      prediction += sparse_mat[i][j] * models[data[nstart+j]];
+    }
+
+    loss += (prediction - target_dat[i]) * (prediction - target_dat[i]);
+  }
+  return loss;
 }
 
 void load_data(string file, vector<int> &p_examples, vector<int> &p_nelems, vector<int> &indices) {
@@ -112,6 +168,33 @@ void load_data(string file, vector<int> &p_examples, vector<int> &p_nelems, vect
   fin.close();
 }
 
+double ** generate_random_data_for_access_pattern(vector<int> &indices, vector<int> &p_nelems) {
+  double **random_sparse_dat = (double **)calloc(p_nelems.size(), sizeof(double *));
+  if (random_sparse_dat == NULL) {
+    cout << "FAILED TO ALLOCATE SPARSE DATA" << endl;
+    exit(0);
+  }
+  int indices_track = 0;
+  for (int data_point_id = 0; data_point_id < p_nelems.size(); data_point_id++) {
+    random_sparse_dat[data_point_id] = (double *)calloc(p_nelems[data_point_id], sizeof(double));
+    if (random_sparse_dat[data_point_id] == NULL) {
+      cout << "FAILED TO ALLOCATE SPARSE DATA VALUES" << endl;
+      exit(0);
+    }
+    for (int j = 0; j < p_nelems[data_point_id]; j++) {
+      random_sparse_dat[data_point_id][j] = rand() % VALUE_RANGE;
+    }
+  }
+  return random_sparse_dat;
+}
+
+double * generate_random_target_values(int size) {
+  double * target_values = (double *)malloc(sizeof(double) * size);
+  for (int i = 0; i < size; i++)
+    target_values[i] = rand() % VALUE_RANGE;
+  return target_values;
+}
+
 int count_batches_in_file(string file) {
   ifstream count_batches_file(file);
   string line;
@@ -124,7 +207,7 @@ int count_batches_in_file(string file) {
   return n_batches;
 }
 
-void cyclades_no_sync_or_hogwild(int should_cyc_no_sync) {
+void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
   //Load data
   vector<int> p_examples;
   vector<int> p_nelems;
@@ -159,7 +242,12 @@ void cyclades_no_sync_or_hogwild(int should_cyc_no_sync) {
   int* numa_aware_indices_hogwild[NTHREAD];
   const int NELEM_HOGWILD = p_examples.size() / NTHREAD;
   for(int ithread=0;ithread<NTHREAD;ithread++){
-    numa_run_on_node(ithread / (NTHREAD / 2));
+    if (NTHREAD == 1) {
+      numa_run_on_node(0);
+    }
+    else {
+      numa_run_on_node(ithread / (NTHREAD / 2));
+    }
     numa_set_localalloc();
     numa_aware_indices[ithread] = new int[NELEMS[ithread]];
     numa_aware_indices_hogwild[ithread] = new int[NELEM_HOGWILD];
@@ -209,26 +297,37 @@ void cyclades_no_sync_or_hogwild(int should_cyc_no_sync) {
 
     vector<thread> threads;
     for(int i=0;i<NTHREAD;i++){
-      numa_run_on_node(i / (NTHREAD / 2));
-      if (should_cyc_no_sync) {
-	threads.push_back(thread(_do, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));
+      if (NTHREAD == 1) {
+	numa_run_on_node(0);
       }
       else {
-	threads.push_back(thread(_do, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
+	numa_run_on_node(i / (NTHREAD / 2));
+      }
+      if (should_cyc_no_sync) {
+	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));
+      }
+      else {
+	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
       }
     }
     for (int i = 0; i <NTHREAD; i++)
       threads[i].join();
   }
+
   cout << t.elapsed() << endl;
 }
 
 void cyclades_benchmark() {
-  //Load data
+  
+  //Load data access pattern
   vector<int> p_examples;
   vector<int> p_nelems;
   vector<int> indices;
   load_data(DATA_FILE, p_examples, p_nelems, indices);
+
+  //Generate random data based on access pattern
+  double **random_sparse_data = generate_random_data_for_access_pattern(indices, p_nelems);
+  double * target_values = generate_random_target_values(p_nelems.size());
   
   //First, count number of batches from file
   int n_batches = 0;
@@ -261,8 +360,13 @@ void cyclades_benchmark() {
   //Allocate space on numa nodes
   //numa aware indieces : triple array of form [batch_id][thread][Edge in CC as data point id]
   int* numa_aware_indices[n_batches][NTHREAD];
-  for(int ithread=0;ithread<NTHREAD;ithread++){
-    numa_run_on_node(ithread / (NTHREAD / 2));
+  for(int ithread=0;ithread<NTHREAD;ithread++){      
+    if (NTHREAD == 1) {
+      numa_run_on_node(0);
+    }
+    else {
+      numa_run_on_node(ithread / (NTHREAD / 2));
+    }
     numa_set_localalloc();
     for (int i = 0; i < n_batches; i++) {
       numa_aware_indices[i][ithread] = (int *)numa_alloc_onnode(NELEMS[i][ithread] * sizeof(int), ithread % 2);
@@ -297,27 +401,44 @@ void cyclades_benchmark() {
   //Do the computation
   Timer t;
   for(int iepoch=0;iepoch<N_EPOCHS;iepoch++){
+    cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
     vector<thread> threads;
     for(int i=0;i<NTHREAD;i++){
-      numa_run_on_node(i / (NTHREAD / 2));
-      threads.push_back(thread(_do_cyclades, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i, n_batches));
+      if (NTHREAD == 1) {
+	numa_run_on_node(0);
+      }
+      else {
+	numa_run_on_node(i / (NTHREAD / 2));
+      }
+      threads.push_back(thread(_do_cyclades_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i, n_batches));
     }
     for(int i=0;i<threads.size();i++){
       threads[i].join();
     }
+
+    cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
   }
   cout << t.elapsed() << endl;
+
+  //Free data
+  for (int i = 0; i < p_nelems.size(); i++) 
+    free(random_sparse_data[i]);
+  free(random_sparse_data);
+  free(target_values);
 }
 
 int main(int argc, char ** argv){
+  srand(time(NULL));
+  cout.precision(30);
+  for (int i = 0; i < MODEL_SIZE; i++) models[i] = 0;
   if (CYCLADES) {
     cyclades_benchmark();
   }
   if (CYC_NO_SYNC) {
-    cyclades_no_sync_or_hogwild(1);
+    cyclades_no_sync_or_hogwild_benchmark(1);
   }
   if (HOGWILD) {
-    cyclades_no_sync_or_hogwild(0);
+    cyclades_no_sync_or_hogwild_benchmark(0);
   }
   
   return 0;

@@ -1,5 +1,5 @@
 N_EPOCHS=10
-GRAD_COST=10
+GRAD_COST=1
 
 UNAME := $(shell uname)
 
