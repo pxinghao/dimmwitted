@@ -7,6 +7,7 @@
 #include <algorithm> 
 #include <math.h>
 #include <time.h>
+#include <set>
 
 #include <unistd.h>
 
@@ -26,12 +27,12 @@ using namespace std;
 
 #define VALUE_RANGE 10
 #define GAMMA .00001
-#define NTHREAD 16
+#define NTHREAD 8
 #define MODEL_SIZE 1000000
 #define DATA_FILE "data/dataaccess_data_multinomialLogisticRegression.txt"
-#define DATA_ACCESS_FILE "data/dataaccess_nthreads16_multinomialLogisticRegression.txt"
+#define DATA_ACCESS_FILE "data/dataaccess_nthreads8_multinomialLogisticRegression.txt"
 
-double models[MODEL_SIZE];
+double volatile models[MODEL_SIZE];
 int volatile thread_batch_on[NTHREAD];
 
 void _do_simulation(int * data, int* nelems, int * indices, int * myindices, int nelem, int thread_id){
@@ -334,12 +335,12 @@ void cyclades_benchmark() {
   n_batches = count_batches_in_file(DATA_ACCESS_FILE);
 
   //NELEMS will count # of elements in cyclades batches
-  int NELEMS[n_batches][NTHREAD];
+  int NELEMS[NTHREAD][n_batches];
 
   //Clear NELEMS
   for(int i=0;i<NTHREAD;i++){
     for (int j = 0; j < n_batches; j++) {
-      NELEMS[j][i] = 0;
+      NELEMS[i][j] = 0;
     }
   }
 
@@ -353,13 +354,13 @@ void cyclades_benchmark() {
 
     linestream >> batch_id >> thread;
     while(linestream >> exampleid){
-      NELEMS[batch_id][thread]++;
+      NELEMS[thread][batch_id]++;
     }
   }
   
   //Allocate space on numa nodes
-  //numa aware indieces : triple array of form [batch_id][thread][Edge in CC as data point id]
-  int* numa_aware_indices[n_batches][NTHREAD];
+  //numa aware indices : triple array of form [thread][batch_id][edge]
+  int* numa_aware_indices[NTHREAD][n_batches];
   for(int ithread=0;ithread<NTHREAD;ithread++){      
     if (NTHREAD == 1) {
       numa_run_on_node(0);
@@ -369,7 +370,8 @@ void cyclades_benchmark() {
     }
     numa_set_localalloc();
     for (int i = 0; i < n_batches; i++) {
-      numa_aware_indices[i][ithread] = (int *)numa_alloc_onnode(NELEMS[i][ithread] * sizeof(int), ithread % 2);
+      //numa_aware_indices[ithread][i] = (int *)numa_alloc_onnode(NELEMS[i][ithread] * sizeof(int), ithread / (NTHREAD / 2));
+      numa_aware_indices[ithread][i] = new int[NELEMS[ithread][i] * sizeof(int)];
     }
   }
 
@@ -380,43 +382,54 @@ void cyclades_benchmark() {
   //Clear NELEMS to keep track of batch count
   for(int i=0;i<NTHREAD;i++){
     for (int j = 0; j < n_batches; j++) {
-      NELEMS[j][i] = 0;
+      NELEMS[i][j] = 0;
     }
   }
 
+  vector<int> test_sets[n_batches][NTHREAD];
+
+  int prev_batch = -1;
   //Read in actual data to numa_aware_indeices
   while(getline(file, line)){
     stringstream linestream(line);
     string data;
-
     int batch, thread, exampleid;
     linestream >> batch >> thread;
+
     while(linestream >> exampleid){
-      numa_aware_indices[batch][thread][NELEMS[batch][thread]] = exampleid;
-      NELEMS[batch][thread]++;
+      numa_aware_indices[thread][batch][NELEMS[thread][batch]] = exampleid;
+      NELEMS[thread][batch]++;
+      
+      /*//REMOVE ME
+      for (int i = p_examples[exampleid]; i < p_examples[exampleid] + p_nelems[exampleid]; i++) {
+	test_sets[batch][thread].push_back(indices[i]);
+      }
+      //REMOVE ME*/
+
     }
+    prev_batch = batch;
   }
   file.close();
 
   //Do the computation
   Timer t;
-  for(int iepoch=0;iepoch<N_EPOCHS;iepoch++){
-    cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
+  for(int iepoch = 0; iepoch < N_EPOCHS; iepoch++){
     vector<thread> threads;
-    for(int i=0;i<NTHREAD;i++){
+    for(int i = 0 ; i < NTHREAD; i++) {
       if (NTHREAD == 1) {
 	numa_run_on_node(0);
       }
       else {
 	numa_run_on_node(i / (NTHREAD / 2));
       }
-      threads.push_back(thread(_do_cyclades_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i, n_batches));
+      threads.push_back(thread(_do_cyclades_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], (int **)numa_aware_indices[i], (int *)NELEMS[i], i, n_batches));
     }
-    for(int i=0;i<threads.size();i++){
+    for(int i = 0; i < threads.size(); i++){
       threads[i].join();
     }
-
+    
     cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
+    for (int i = 0; i < MODEL_SIZE; i++) models[i] = 0;
   }
   cout << t.elapsed() << endl;
 
@@ -428,7 +441,7 @@ void cyclades_benchmark() {
 }
 
 int main(int argc, char ** argv){
-  srand(time(NULL));
+  srand(2424);
   cout.precision(30);
   for (int i = 0; i < MODEL_SIZE; i++) models[i] = 0;
   if (CYCLADES) {
