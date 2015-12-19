@@ -4,7 +4,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from subprocess import Popen, PIPE
 
-N_REP = 10
+N_REP = 30
 
 def run_cyclades(command, n_rep, n_epochs, grad_cost):
     # Compile first
