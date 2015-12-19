@@ -42,7 +42,6 @@ void _do_simulation(int * data, int* nelems, int * indices, int * myindices, int
   p_rand_seed[1] = rand();
   p_rand_seed[2] = rand();
 
-
   for(int iid=0;iid<nelem;iid++){
     int eid = myindices[iid];
     int nelem = nelems[eid];
@@ -55,6 +54,32 @@ void _do_simulation(int * data, int* nelems, int * indices, int * myindices, int
 
     for(int j=nstart;j<nstart+nelem;j++){
       models[data[j]] += a;
+    }
+  }
+}
+
+void _do_gradient(double **sparse_mat, double *target, int * data, int* nelems, int * indices, int * myindices, int nelem, int thread_id){
+  
+  unsigned short p_rand_seed[3];
+  p_rand_seed[0] = rand();
+  p_rand_seed[1] = rand();
+  p_rand_seed[2] = rand();
+
+  for(int iid=0;iid<nelem;iid++){
+    int eid = myindices[iid];
+    int dim = nelems[eid];
+    int nstart = indices[eid];
+
+    //Compute gradient
+    double gradient = 0;
+    for (int i = 0; i < dim; i++) {
+      gradient += sparse_mat[eid][i] * models[data[nstart + i]];
+    }
+    gradient -= target[eid];
+    
+    //Apply gradient
+    for(int i = nstart; i < nstart+dim; i++){
+      models[data[i]] = models[data[i]] - GAMMA * sparse_mat[eid][i-nstart] * gradient;
     }
   }
 }
@@ -216,6 +241,10 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
   vector<int> values;
   load_data(DATA_FILE, p_examples, p_nelems, indices);
 
+  //Generate random data based on access pattern
+  double **random_sparse_data = generate_random_data_for_access_pattern(indices, p_nelems);
+  double * target_values = generate_random_target_values(p_nelems.size());
+
   //NELEMS for both cyclades and hogwild
   int NELEMS[NTHREAD];
   int NELEMS_HOGWILD[NTHREAD];
@@ -305,10 +334,11 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
 	numa_run_on_node(i / (NTHREAD / 2));
       }
       if (should_cyc_no_sync) {
-	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));
+	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));       
       }
       else {
-	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
+	//threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
+	threads.push_back(thread(_do_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
       }
     }
     for (int i = 0; i <NTHREAD; i++)
@@ -316,6 +346,13 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
   }
 
   cout << t.elapsed() << endl;
+  cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
+
+  //Free data
+  for (int i = 0; i < p_nelems.size(); i++) 
+    free(random_sparse_data[i]);
+  free(random_sparse_data);
+  free(target_values);
 }
 
 void cyclades_benchmark() {
