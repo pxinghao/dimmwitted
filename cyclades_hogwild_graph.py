@@ -8,13 +8,12 @@ N_REP = 10
 
 def run_cyclades(command, n_rep, n_epochs, grad_cost):
     # Compile first
-    Popen(["make", command+"_comp", "N_EPOCHOS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0]
+    Popen(["make", command+"_comp", "N_EPOCHS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0]
 
     # Take vareage of n_rep iterations
     avg = 0
     for i in range(n_rep):
-        output = float(Popen(["make", command+"_run", "N_EPOCHOS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0].strip())
-        #print(output)
+        output = float(Popen(["make", command+"_run", "N_EPOCHS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0].strip())
         avg += output
     avg  = avg / float(n_rep)
 
@@ -53,9 +52,9 @@ def plotdata_across_epochs(grad_cost, epoch_range):
     plt.savefig("figure.png")
 
 
-#run_cyclades("cyc", 10, 10, 1);
-#run_cyclades("cyc_no_sync", 10, 10, 1);
-#run_cyclades("hog", 10, 10, 1);
+run_cyclades("cyc", 10, 10, 1);
+run_cyclades("cyc_no_sync", 10, 10, 1);
+run_cyclades("hog", 10, 10, 1);
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
-plotdata_across_epochs(1, list(range(1, 500, 10)))
+#plotdata_across_epochs(1, list(range(1, 500, 10)))

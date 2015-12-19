@@ -33,13 +33,13 @@ endif
 
 cyc_no_sync_comp:
 	@rm -rf cyc_no_sync
-	@g++ -Ofast -std=c++11 cyc_no_sync.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -o cyc_no_sync
+	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYC_NO_SYNC=1 -o cyc_no_sync
 cyc_comp:
 	@rm -rf cyc
-	@g++ -Ofast -std=c++11 cyclades.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -o cyc
+	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYCLADES=1 -o cyc
 hog_comp:
 	@rm -rf hog
-	@g++ -Ofast -std=c++11 hogwild.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -o hog
+	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DHOGWILD=1 -o hog
 
 cyc_no_sync_run:
 	@numactl --interleave=0,1 ./cyc_no_sync
@@ -48,15 +48,6 @@ cyc_run:
 hog_run:
 	@numactl --interleave=0,1 ./hog
 
-cyc_no_sync:
-	@g++ -Ofast -std=c++11 cyc_no_sync.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST)
-	@numactl --interleave=0,1 ./a.out
-cyc:
-	@g++ -Ofast -std=c++11 cyclades.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST)
-	@numactl --interleave=0,1 ./a.out
-hog:
-	@g++ -Ofast -std=c++11 hogwild.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST)
-	@numactl --interleave=0,1 ./a.out
 exp_cyc:
 	$(CXX) $(CPP_FLAG) $(CPP_INCLUDE) examples/example_cyclades.cpp -o example_cyclades $(CPP_LAST)
 
