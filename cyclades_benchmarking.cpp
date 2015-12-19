@@ -398,14 +398,7 @@ void cyclades_benchmark() {
 
     while(linestream >> exampleid){
       numa_aware_indices[thread][batch][NELEMS[thread][batch]] = exampleid;
-      NELEMS[thread][batch]++;
-      
-      /*//REMOVE ME
-      for (int i = p_examples[exampleid]; i < p_examples[exampleid] + p_nelems[exampleid]; i++) {
-	test_sets[batch][thread].push_back(indices[i]);
-      }
-      //REMOVE ME*/
-
+      NELEMS[thread][batch]++;      
     }
     prev_batch = batch;
   }
@@ -426,12 +419,11 @@ void cyclades_benchmark() {
     }
     for(int i = 0; i < threads.size(); i++){
       threads[i].join();
-    }
-    
-    cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
-    for (int i = 0; i < MODEL_SIZE; i++) models[i] = 0;
+      thread_batch_on[i] = 0;
+    }    
   }
   cout << t.elapsed() << endl;
+  cout << compute_loss(random_sparse_data, target_values, &indices[0], &p_examples[0], p_nelems) << endl;
 
   //Free data
   for (int i = 0; i < p_nelems.size(); i++) 
