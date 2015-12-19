@@ -12,13 +12,17 @@ def run_cyclades(command, n_rep, n_epochs, grad_cost):
 
     # Take vareage of n_rep iterations
     avg = 0
+    avg_loss = 0
     for i in range(n_rep):
-        output = float(Popen(["make", command+"_run", "N_EPOCHS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0].strip())
-        avg += output
+        outputs = Popen(["make", command+"_run", "N_EPOCHS="+str(n_epochs), "GRAD_COST="+str(grad_cost)], stdout=PIPE).communicate()[0].strip().split()
+        time, loss = float(outputs[0]), float(outputs[1])
+        avg += time
+        avg_loss += loss
     avg  = avg / float(n_rep)
+    avg_loss = avg_loss / float(n_rep)
 
     # Return avg
-    print(command+": ", avg)
+    print(command+": Average Time: ", avg, " Loss ", avg_loss)
     return avg
 
 def plotdata_across_grad_cost(n_epoch, grad_cost_range):

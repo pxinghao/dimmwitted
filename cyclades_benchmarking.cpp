@@ -174,7 +174,7 @@ double compute_loss(double **sparse_mat, double *target_dat, int *data, int *ind
 
     loss += (prediction - target_dat[i]) * (prediction - target_dat[i]);
   }
-  return loss;
+  return loss / (double)p_nelems.size();
 }
 
 void load_data(string file, vector<int> &p_examples, vector<int> &p_nelems, vector<int> &indices) {
@@ -334,7 +334,8 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
 	numa_run_on_node(i / (NTHREAD / 2));
       }
       if (should_cyc_no_sync) {
-	threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));       
+	//threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));       
+	threads.push_back(thread(_do_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));       
       }
       else {
 	//threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices_hogwild[i], NELEMS_HOGWILD[i], i));
@@ -470,8 +471,7 @@ void cyclades_benchmark() {
 }
 
 int main(int argc, char ** argv){
-  srand(2424);
-  cout.precision(30);
+  srand(0);
   for (int i = 0; i < MODEL_SIZE; i++) models[i] = 0;
   if (CYCLADES) {
     cyclades_benchmark();
