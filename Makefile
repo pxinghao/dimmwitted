@@ -31,6 +31,11 @@ CPP_LAST =
 
 endif
 
+cyc_movielens:
+	rm  -rf movielens_cyc
+	g++ -Ofast -std=c++11 cyclades_movielens_benchmarking.cpp -lnuma -pthread -o movielens_cyc
+	numactl --interleave=0,1 ./movielens_cyc
+
 cyc_model_dup_comp:
 	@rm -rf cyc_model_dup
 	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DMODEL_DUP=1 -o cyc_model_dup
@@ -39,7 +44,7 @@ cyc_no_sync_comp:
 	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYC_NO_SYNC=1 -o cyc_no_sync
 cyc_comp:
 	@rm -rf cyc
-	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYCLADES=1 -o cyc
+	g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYCLADES=1 -o cyc
 hog_comp:
 	@rm -rf hog
 	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DHOGWILD=1 -o hog
