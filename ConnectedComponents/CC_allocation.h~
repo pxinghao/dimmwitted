@@ -1,0 +1,92 @@
+#include <iostream>
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/adjacency_list.hpp>
+#include <vector>
+#include <thread>
+#include "../src/util.h"
+#include <fstream>
+#include <string>
+#include <algorithm> 
+#include <math.h>
+#include <time.h>
+#include <set>
+
+#include <unistd.h>
+
+
+#define BATCH_SIZE 400
+#define NTHREAD 8
+
+using namespace std;
+
+void CC_batch(double ** data_points, int num_data_points, int dimension, int *** numa_aware_indices, int ** NELEMS, int num_numa_nodes, int batch_num) {
+  //Keep track of an array of coordinates' data points
+  vector<int> coordinate_data_point_list[dimension];
+  
+  //For every data point, add the datapoint to the corresponding list in the coordinate
+  //data point list if the data point has a non-zero element at the index of the data point
+  for (int i = 0; i < num_data_points; i++) {
+    for (int j = 0; j < dimension; j++) {
+      if (data_points[i][j] != 0) coordinate_data_point_list[j].push_back(i);
+    }
+  }
+  
+  //Create the graph, where edge between data points if they are
+  //in the same vector of coordinate data point list
+  boost::adjacency_list<> g(num_data_points); 
+  for (int i = 0; i < dimension; i++) {
+    vector<int> connected_data_points = coordinate_data_point_list[i];
+    for (int j = 0; j < connected_data_points.size(); j++) {
+      for (int k = 0; k < connected_data_points.size(); k++) {
+	if (j != k) {
+	  boost::add_edge(j, k, g);
+	}
+      }
+    }
+  }
+
+  //Compute CC
+  vector<int> components(num_data_points);
+  int num_total_components = boost::connected_components(g, &components[0]);
+  
+  //Aggregate mapping into array of sets of CC's
+  vector<int> CCs[num_total_components];
+  for (int i = 0; i < components.size(); i++) {
+    CCs[components[i]].push_back(i);
+  }
+
+  //Fill out num_numa nodes and NELEMS
+  for (int i = 0; i < num_total_components; i++) {
+    int assign_to_thread = i % NTHREAD;
+    int numa_node_to_alloc_on = 0;
+    if (NTHREAD != 1) numa_node_to_alloc_on = assign_to_thread / (NTHREAD / num_numa_nodes);
+    numa_run_on_node(numa_node_to_alloc_on);
+    numa_set_localalloc();
+    NELEMS[assign_to_thread][batch_num] = CCs[i].size();
+    numa_aware_indices[assign_to_thread][batch_num] = (int *)numa_alloc_onnode(CCs[i].size() * sizeof(int), numa_node_to_alloc_on);
+    for (int j = 0; j < CCs[i].size(); j++) {
+      numa_aware_indices[assign_to_thread][batch_num][j] = CCs[i][j];
+    }
+  }
+}
+
+void CC_allocate(double **data_points, int num_data_points, int dimension, int num_numa_nodes) {
+  vector<thread> threads;
+
+  int num_batches = (int)ceil(num_data_points / (float)BATCH_SIZE);
+  int *numa_aware_indices[NTHREAD][num_batches];
+  int NELEMS[NTHREAD][num_batches];
+
+  //Parallelize batches
+  int batch_num = 0;
+  for (int i = 0; i < num_data_points; i += BATCH_SIZE, batch_num++) {
+    int num_elements = min(num_data_points, i + BATCH_SIZE) - i;
+    threads.push_back(thread(CC_batch, &data_points[i * dimension], num_elements, dimension,
+			     (int ***)numa_aware_indices, (int **)NELEMS, num_numa_nodes, batch_num));
+  }
+
+  //Join threads
+  for (int i = 0; i < threads.size(); i++) {
+    threads[i].join();
+  }
+}

@@ -56,7 +56,7 @@ def plotdata_across_epochs(grad_cost, epoch_range):
     plt.savefig("figure.png")
 
 
-run_cyclades("cyc_model_dup", 10, 10, 1);
+#run_cyclades("cyc_model_dup", 10, 10, 1);
 run_cyclades("cyc", 10, 10, 1);
 run_cyclades("cyc_no_sync", 10, 10, 1);
 run_cyclades("hog", 10, 10, 1);

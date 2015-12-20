@@ -36,7 +36,7 @@ using namespace std;
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 4
 #endif
 #ifndef N_NUMA_NODES
 #define N_NUMA_NODES 2
@@ -48,7 +48,7 @@ using namespace std;
 
 #define MODEL_SIZE 1000000
 #define DATA_FILE "data/dataaccess_data_multinomialLogisticRegression.txt"
-#define DATA_ACCESS_FILE "data/dataaccess_nthreads8_multinomialLogisticRegression.txt"
+#define DATA_ACCESS_FILE "data/dataaccess_nthreads4_multinomialLogisticRegression.txt"
 
 double volatile models[MODEL_SIZE];
 int volatile thread_batch_on[NTHREAD];
@@ -483,7 +483,7 @@ void cyclades_benchmark() {
     }
     numa_set_localalloc();
     for (int i = 0; i < n_batches; i++) {
-      //numa_aware_indices[ithread][i] = (int *)numa_alloc_onnode(NELEMS[i][ithread] * sizeof(int), ithread / (NTHREAD / N_NUMA_NODES));
+      //numa_aware_indices[ithread][i] = (int *)numa_alloc_onnode(NELEMS[ithread][i] * sizeof(int), ithread / (NTHREAD / N_NUMA_NODES));
       numa_aware_indices[ithread][i] = new int[NELEMS[ithread][i] * sizeof(int)];
     }
   }

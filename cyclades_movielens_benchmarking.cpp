@@ -18,9 +18,9 @@
 
 
 #define N_NUMA_NODES 2
-#define N_EPOCHS 10
-#define BATCH_SIZE 200
-#define NTHREAD 8
+#define N_EPOCHS 100
+#define BATCH_SIZE 1000
+#define NTHREAD 16
 
 using namespace std;
 
@@ -50,6 +50,7 @@ void get_item_data(map<int, vector<double> > &item_dat) {
     string movie_title, release_date, video_release_date, url;
     linestream >> movie_id >> movie_title >> release_date >> video_release_date >> url;
     linestream >> unknown >> action >> adventure >> animation >> children >> comedy >> crime >> documentary >> drama >> fantasy >> noir >> horror >> musical >> mystery >> romance >> scifi >> thriller >> war >> western;
+
     vector<double> features;
     features.push_back(movie_id);
     features.push_back(unknown); 
@@ -71,6 +72,7 @@ void get_item_data(map<int, vector<double> > &item_dat) {
     features.push_back(thriller);
     features.push_back(war);
     features.push_back(western);
+    for (int i = 0; i < features.size(); i++) features[i] = rand() % 100;
     item_dat[(int)movie_id] = features;
   }  
   fin.close();
@@ -119,7 +121,6 @@ double ** extract_data_info(double **dat, vector<int> &p_examples, vector<int> &
 	count += 1;
       }
     }
-
     int insert_index = 0;
     sparse_mat[i] = (double *)malloc(sizeof(double) * num_non_zero_features);
     for (int j = 0; j < TOTAL_N_FEATURES; j++) {
@@ -136,8 +137,16 @@ void cyclades_movielens() {
 
   //Load movie data
   double **mat = (double **)malloc(sizeof(double *) * N_RATINGS);
-  for (int i = 0; i < N_RATINGS; i++) mat[i] = (double *)malloc(sizeof(double) * TOTAL_N_FEATURES);
+  for (int i = 0; i < N_RATINGS; i++) mat[i] = (double *)calloc(TOTAL_N_FEATURES, sizeof(double));
   double *values = (double *)malloc(sizeof(double) * N_RATINGS);
+
+  /*for (int i = 0; i < N_RATINGS; i++) {
+    for (int j = 0; j < TOTAL_N_FEATURES; j++) {
+      mat[i][j] = i+1;
+    }
+  }
+  for (int i = 0; i < N_RATINGS; i++) values[i] = i+1;
+  */
   get_full_data(mat, values);
   
   //Extract data info
@@ -146,20 +155,53 @@ void cyclades_movielens() {
 
   //Extract CC info
   int num_batches = (int)ceil(N_RATINGS / (float)BATCH_SIZE);
-  int *numa_aware_indices[NTHREAD*num_batches];
-  int NELEMS[NTHREAD*num_batches];
+  //int *numa_aware_indices[NTHREAD*num_batches];
+  //int NELEMS[NTHREAD*num_batches];
+  int ***numa_aware_indices = new int ** [NTHREAD];
+  int **NELEMS = new int *[NTHREAD];
+  for (int i = 0; i < NTHREAD; i++) {
+    numa_aware_indices[i] = new int * [num_batches];
+    NELEMS[i] = (int *)calloc(num_batches, sizeof(int));
+  }
+  
   Timer t2;
-  CC_allocate(mat, N_RATINGS, TOTAL_N_FEATURES, N_NUMA_NODES, (int **)numa_aware_indices, (int *)NELEMS, BATCH_SIZE, NTHREAD);
-  cout << "WAT: " << t2.elapsed() << endl;
+  CC_allocate(mat, N_RATINGS, TOTAL_N_FEATURES, N_NUMA_NODES, numa_aware_indices, NELEMS, BATCH_SIZE, NTHREAD);
+  /*cout << "CC ALLOC TIME: " << t2.elapsed() << endl;
+
+  for (int i = 0; i < NTHREAD; i++) {
+    cout << "THREAD " << i << endl;
+    for (int j = 0; j < num_batches; j++) {
+      cout << "BATCH " << j << endl;
+      for (int k = 0; k < NELEMS[i][j]; k++) {
+	cout << "DATA POINT " << numa_aware_indices[i][j][k] << endl;
+      }
+    }
+    }*/
   
   //Do Cyclades
   Timer t;
   apply_cyclades(sparse_mat, values, p_examples, p_nelems, indices, NELEMS, numa_aware_indices, NTHREAD, N_NUMA_NODES, num_batches, N_EPOCHS);
   cout << "TIME ELAPSED: " << t.elapsed() << endl;
   cout << "LOSS: " << compute_loss(sparse_mat, values, &indices[0], &p_examples[0], p_nelems) << endl;
+
+  //Free mem
+  for (int i = 0; i < N_RATINGS; i++) {
+    free(mat[i]);
+  }
+  free(mat);
+  free(values);
+  for (int i = 0; i < NTHREAD; i++) {
+    for (int j = 0; j < num_batches; j++)
+      numa_free(numa_aware_indices[i][j], NELEMS[i][j]);
+    free(NELEMS[i]);
+    free(numa_aware_indices[i]);
+  }
+  free(NELEMS);
+  free(numa_aware_indices);
 }
 
 int main(void) {
+  setprecision(15);
   for (int i = 0; i < N_RATINGS; i++) models[i] = 0;
   cyclades_movielens();
 }

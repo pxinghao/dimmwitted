@@ -1,0 +1,32 @@
+UNAME := $(shell uname)
+
+### LINUX ###
+ifeq ($(UNAME), Linux)
+
+ifndef CXX
+CXX=g++
+endif
+
+CPP_FLAG = -O3 -std=c++11 -I./lib/libunwind-1.1/include -L./lib/numactl-2.0.9 -I./lib/numactl-2.0.9
+CPP_INCLUDE = -I./src
+CPP_JULIA_LIBRARY = -fPIC -lnuma -shared src/helper/julia_helper.cpp -o libdw_julia.so
+CPP_LAST = -lrt -lnuma -l pthread
+
+endif
+
+### MAC ###
+ifeq ($(UNAME), Darwin)
+
+ifndef CXX
+CXX=clang++
+endif
+
+CPP_FLAG = -O3 -std=c++11  
+CPP_INCLUDE = -I./src
+CPP_JULIA_LIBRARY = -dynamiclib src/helper/julia_helper.cpp -o libdw_julia.dylib
+CPP_LAST = 
+
+endif
+
+cc_alloc:
+	 g++ -std=c++11 CC_allocation.cpp -lnuma -lpthread 

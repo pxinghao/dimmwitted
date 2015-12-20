@@ -33,7 +33,7 @@ endif
 
 cyc_movielens:
 	rm  -rf movielens_cyc
-	g++ -Ofast -std=c++11 cyclades_movielens_benchmarking.cpp -lnuma -pthread -o movielens_cyc
+	g++ -Ofast -std=c++11 cyclades_movielens_benchmarking.cpp -lnuma -lpthread -o movielens_cyc
 	numactl --interleave=0,1 ./movielens_cyc
 
 cyc_model_dup_comp:
