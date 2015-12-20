@@ -31,6 +31,9 @@ CPP_LAST =
 
 endif
 
+cyc_model_dup_comp:
+	@rm -rf cyc_model_dup
+	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DMODEL_DUP=1 -o cyc_model_dup
 cyc_no_sync_comp:
 	@rm -rf cyc_no_sync
 	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DCYC_NO_SYNC=1 -o cyc_no_sync
@@ -41,6 +44,8 @@ hog_comp:
 	@rm -rf hog
 	@g++ -Ofast -std=c++11 cyclades_benchmarking.cpp -lnuma -lpthread -DN_EPOCHS=$(N_EPOCHS) -DGRAD_COST=$(GRAD_COST) -DHOGWILD=1 -o hog
 
+cyc_model_dup_run:
+	@numactl --interleave=0,1 ./cyc_model_dup
 cyc_no_sync_run:
 	@numactl --interleave=0,1 ./cyc_no_sync
 cyc_run:
