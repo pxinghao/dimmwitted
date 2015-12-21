@@ -75,11 +75,12 @@ def plotdata_across_epochs(grad_cost, epoch_range):
 
 def plotloss_across_epochs(epoch_range):
     cyc_avgs, hog_avgs = [], []
-    for epoch_limit in epoch_range:
-        cyc_loss_avg = run_cyclades_params("cyc_movielens_cyc", N_REP, ["EPOCH_LIMIT="+str(epoch_limit)," N_EPOCHS=10000"])
-        hog_loss_avg = run_cyclades_params("cyc_movielens_hog", N_REP, ["EPOCH_LIMIT="+str(epoch_limit)," N_EPOCHS=10000"])
-        cyc_avgs.append((epoch_limit, cyc_loss_avg))
-        hog_avgs.append((epoch_limit, hog_loss_avg))
+    for t_limit in epoch_range:
+        cyc_loss_avg = run_cyclades_params("cyc_movielens_cyc", N_REP, ["TIME_LIMIT="+str(t_limit)," N_EPOCHS=1000000000000"])
+        hog_loss_avg = run_cyclades_params("cyc_movielens_hog", N_REP, ["TIME_LIMIT="+str(t_limit)," N_EPOCHS=1000000000000"])
+
+        cyc_avgs.append((t_limit, cyc_loss_avg))
+        hog_avgs.append((t_limit, hog_loss_avg))
     plt.plot(*zip(*cyc_avgs), color='r', label="cyc_loss_avgs")
     plt.plot(*zip(*hog_avgs), color='b', label="hog_loss_avgs")
     plt.legend(loc='upper left')
@@ -92,4 +93,4 @@ def plotloss_across_epochs(epoch_range):
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
 #plotdata_across_epochs(1, list(range(1, 500, 10)))
-plotloss_across_epochs(list(np.arange(1,3,.2)))
+plotloss_across_epochs(list(np.arange(.1, 1, .1)) + list(np.arange(1,5,1)))

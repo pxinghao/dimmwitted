@@ -12,6 +12,10 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
+#ifndef TIME_LIMIT
+#define TIME_LIMIT 10000000
+#endif
+
 #ifndef CYC
 #define CYC 0
 #endif
@@ -19,8 +23,8 @@
 #define HOG 0
 #endif
 
-#define N_USERS 944
-#define N_MOVIES 1683
+#define N_USERS 6041
+#define N_MOVIES 3953
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
@@ -29,14 +33,8 @@
 #define BATCH_SIZE 200
 #define NTHREAD 8
 
-#ifndef EPOCH_LIMIT
-#define EPOCH_LIMIT 2
-#endif
-
 #define RLENGTH 30
-
 #define GAMMA_REDUCTION_FACTOR .8
-
 double GAMMA = 5e-2;
 double C = 0;
 
@@ -62,7 +60,7 @@ double compute_loss(vector<DataPoint> &p) {
     double diff = dp - r - C;
     loss += diff * diff;
   }
-  return loss / (double)p.size();
+  return sqrt(loss / (double)p.size());
 }
 
 void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
@@ -194,15 +192,20 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  ifstream in("ml-100k/u.data");
+  ifstream in("ml-1m/ratings.dat");
   string s;
+  string delimiter = "::";
 
   while (getline(in, s)) {
-    stringstream str_stream(s);
-    double userid, movieid, rating;
-    str_stream >> userid >> movieid >> rating;
-    C += rating;
-    datapoints.push_back(DataPoint(userid, movieid, rating));
+    int pos = 0;
+    int count = 0;
+    double features[4];
+    while ((pos = s.find(delimiter)) != string::npos) {
+      features[count++] = (double)stoi(s.substr(0, pos));
+      s.erase(0, pos + delimiter.length());
+    }
+    C += features[2];
+    datapoints.push_back(DataPoint(features[0], features[1], features[2]));
   }
   C /= (double)datapoints.size();
   return datapoints;
@@ -259,6 +262,7 @@ void cyclades_movielens_completion() {
   //Perform cyclades
   Timer t;
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (t.elapsed() >= TIME_LIMIT) break;
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
@@ -273,14 +277,14 @@ void cyclades_movielens_completion() {
   }
   //cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;;
-  cout << t.elapsed() << endl;
+  //cout << t.elapsed() << endl;
   cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
   //Get data
   vector<DataPoint> points = get_movielens_data();
-  random_shuffle(points.begin(), points.end());
+  //random_shuffle(points.begin(), points.end());
 
   //Hogwild access pattern construction
   vector<vector<int *> > access_pattern(NTHREAD);
@@ -292,18 +296,17 @@ void hogwild_completion() {
     access_pattern[i].resize(1);
     access_length[i].resize(1);
 
-    int start_point = i;
-    int end_point = min(i + n_points_per_thread, (int)points.size());
-    access_pattern[i][0] = (int *)malloc(sizeof(int) * (end_point-start_point));
-    for (int j = start_point; j < end_point; j++) {
-      access_pattern[i][0][j-start_point] = j;
+    access_pattern[i][0] = (int *)malloc(sizeof(int) * n_points_per_thread);
+    for (int j = 0; j < n_points_per_thread; j++) {
+      access_pattern[i][0][j] = rand() % points.size();
     }
-    access_length[i][0] = end_point-start_point;
+    access_length[i][0] = n_points_per_thread;
   }
 
   //Divide to threads
   Timer t;
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (t.elapsed() >= TIME_LIMIT) break;
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
@@ -311,11 +314,12 @@ void hogwild_completion() {
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
     }
+    cout << compute_loss(points) << endl;
     GAMMA *= GAMMA_REDUCTION_FACTOR;
   }
   //cout << "HOGWILD GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;
-  cout << t.elapsed() << endl;
+  //cout << t.elapsed() << endl;
   cout << compute_loss(points) << endl;
 }
 
