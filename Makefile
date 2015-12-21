@@ -31,9 +31,14 @@ CPP_LAST =
 
 endif
 
-cyc_movielens:
+cyc_movielens_completion:
+	rm -rf movielens_completion
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_completion
+	numactl --interleave=0,1 ./movielens_completion
+
+cyc_movielens_sgd:
 	rm  -rf movielens_cyc
-	g++ -Ofast -std=c++11 cyclades_movielens_benchmarking.cpp -lnuma -lpthread -o movielens_cyc
+	g++ -Ofast -std=c++11 cyclades_movielens_sgdtest.cpp -lnuma -lpthread -o movielens_cyc
 	numactl --interleave=0,1 ./movielens_cyc
 
 cyc_model_dup_comp:
