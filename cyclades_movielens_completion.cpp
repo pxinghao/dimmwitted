@@ -314,7 +314,6 @@ void hogwild_completion() {
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
     }
-    cout << compute_loss(points) << endl;
     GAMMA *= GAMMA_REDUCTION_FACTOR;
   }
   //cout << "HOGWILD GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
