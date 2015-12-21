@@ -24,13 +24,21 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 20
 #endif
 #define BATCH_SIZE 200
 #define NTHREAD 8
-#define GAMMA .0001
 
-#define RLENGTH 20
+#ifndef EPOCH_LIMIT
+#define EPOCH_LIMIT 2
+#endif
+
+#define RLENGTH 30
+
+#define GAMMA_REDUCTION_FACTOR .8
+
+double GAMMA = 5e-2;
+double C = 0;
 
 using namespace std;
 
@@ -51,7 +59,7 @@ double compute_loss(vector<DataPoint> &p) {
     for (int i = 0; i < RLENGTH; i++) {
       dp += v_model[x][i] * u_model[y][i];
     }
-    double diff = r - dp;
+    double diff = dp - r - C;
     loss += diff * diff;
   }
   return loss / (double)p.size();
@@ -83,12 +91,12 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
       }
-      gradient -= r;
+      gradient -= r + C;
 
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
-	double new_v = v_model[x][j] - GAMMA * gradient;
-	double new_u = u_model[y][j] - GAMMA * gradient;
+	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
+	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
 	u_model[y][j] = new_u;
       }
@@ -109,12 +117,12 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
       }
-      gradient -= r;
+      gradient -= r + C;
 
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
-	double new_v = v_model[x][j] - GAMMA * gradient;
-	double new_u = u_model[y][j] - GAMMA * gradient;
+	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
+	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
 	u_model[y][j] = new_u;
       }
@@ -138,8 +146,9 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
   //Allocate memory
   int index_count[NTHREAD];
   for (int i = 0; i < NTHREAD; i++) {
-    int numa_node = i % N_NUMA_NODES;
-    
+    int numa_node = i / (NTHREAD / N_NUMA_NODES);
+    numa_run_on_node(numa_node);
+    numa_set_localalloc();
     access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
@@ -192,8 +201,10 @@ vector<DataPoint> get_movielens_data() {
     stringstream str_stream(s);
     double userid, movieid, rating;
     str_stream >> userid >> movieid >> rating;
+    C += rating;
     datapoints.push_back(DataPoint(userid, movieid, rating));
   }
+  C /= (double)datapoints.size();
   return datapoints;
 }
 
@@ -258,7 +269,7 @@ void cyclades_movielens_completion() {
     for (int j = 0; j < NTHREAD; j++) {
       thread_batch_on[j] = 0;
     }
-    //cout << compute_loss(points) << endl;;
+    GAMMA *= GAMMA_REDUCTION_FACTOR;
   }
   //cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;;
@@ -300,6 +311,7 @@ void hogwild_completion() {
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
     }
+    GAMMA *= GAMMA_REDUCTION_FACTOR;
   }
   //cout << "HOGWILD GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;
@@ -308,12 +320,13 @@ void hogwild_completion() {
 }
 
 int main(void) {
+  srand(time(NULL));
   for (int i = 0; i < RLENGTH; i++) {
     for (int j = 0; j < N_USERS; j++) {
-      v_model[j][i] = 0;
+      v_model[j][i] = ((double)rand()/(double)RAND_MAX);
     }
     for (int j = 0; j < N_MOVIES; j++) {
-      u_model[j][i] = 0;
+      u_model[j][i] = ((double)rand()/(double)RAND_MAX);
     }
   }
   if (CYC)

@@ -1,5 +1,6 @@
 N_EPOCHS=10
 GRAD_COST=1
+EPOCH_LIMIT=0
 
 UNAME := $(shell uname)
 
@@ -41,10 +42,10 @@ cyc_movielens_completion_cyc:
 	numactl --interleave=0,1 ./movielens_completion_cyc
 cyc_movielens_hog_comp:
 	@rm -rf movielens_completion_hog
-	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -DN_EPOCHS=$(N_EPOCHS) -o movielens_completion_hog
+	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -DN_EPOCHS=$(N_EPOCHS) -DEPOCH_LIMIT=$(EPOCH_LIMIT) -o movielens_completion_hog
 cyc_movielens_cyc_comp:
 	@rm -rf movielens_completion_cyc
-	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -DN_EPOCHS=$(N_EPOCHS) -o movielens_completion_cyc
+	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -DN_EPOCHS=$(N_EPOCHS)  -DEPOCH_LIMIT=$(EPOCH_LIMIT) -o movielens_completion_cyc
 cyc_movielens_hog_run:
 	@numactl --interleave=0,1 ./movielens_completion_hog
 cyc_movielens_cyc_run:
