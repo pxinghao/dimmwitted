@@ -30,8 +30,8 @@
 #ifndef N_EPOCHS
 #define N_EPOCHS 20
 #endif
-#define BATCH_SIZE 1000
-#define NTHREAD 8
+#define BATCH_SIZE 500
+#define NTHREAD 16
 
 #define RLENGTH 30
 #define GAMMA_REDUCTION_FACTOR .8
@@ -53,8 +53,8 @@ int volatile thread_batch_on[NTHREAD];
 
 //Initialize v and h matrix models
 //double ** v_model, **rmodel;
-double volatile v_model[N_USERS][RLENGTH];
-double volatile u_model[N_MOVIES][RLENGTH];
+double v_model[N_USERS][RLENGTH];
+double u_model[N_MOVIES][RLENGTH];
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
@@ -71,7 +71,19 @@ double compute_loss(vector<DataPoint> &p) {
 }
 
 void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
+  //Keep track of local model
+  double local_v_model[N_USERS][RLENGTH];
+  double local_u_model[N_MOVIES][RLENGTH];
+
   for (int batch = 0; batch < access_length.size(); batch++) {
+
+    //Update local model
+    /*for (int i = 0; i < RLENGTH; i++) {
+      for (int j = 0; j < max(N_USERS, N_MOVIES); j++) {
+	if (j < N_USERS) local_v_model[j][i] = v_model[j][i];
+	if (j < N_MOVIES) local_u_model[j][i] = u_model[j][i];
+      }
+      }*/
 
     //Wait for all threads to be on the same batch
     thread_batch_on[thread_id] = batch;    
@@ -93,8 +105,10 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);
       double gradient = 0;
+      
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
+	//gradient += local_v_model[x][j] * local_u_model[y][j];
       }
       gradient -= r + C;
 
@@ -104,6 +118,10 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
 	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
 	u_model[y][j] = new_u;
+	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
+	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
+	//local_v_model[x][j] = 24;
+	//local_u_model[y][j] = 50;
       }
     }
   }
@@ -209,6 +227,11 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   return CCs;
  }
 
+void threaded_distribute_ccs(vector<DataPoint> &points, int start, int end, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum) {
+  map<int, vector<int> > cc = compute_CC(points, start, end);
+  distribute_ccs(cc, access_pattern, access_length, batchnum);
+}
+
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
@@ -232,7 +255,8 @@ vector<DataPoint> get_movielens_data() {
 }
 
 void cyclades_movielens_completion() {
-  
+  Timer overall;  
+
   //Read data nonzero data points
   vector<DataPoint> points = get_movielens_data();
   random_shuffle(points.begin(), points.end());
@@ -250,19 +274,23 @@ void cyclades_movielens_completion() {
     access_length[i].resize(n_batches);
   }
 
-
   //CC Generation
+  Timer t2;
+  vector<thread> ts;
   for (int i = 0; i < n_batches; i++) {
     
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
 
+    ts.push_back(thread(threaded_distribute_ccs, ref(points), start, end, ref(access_pattern), ref(access_length), i));
     ///Compute connected components of data points
-    map<int, vector<int> > cc = compute_CC(points, start, end);
+    //map<int, vector<int> > cc = compute_CC(points, start, end);
 
     //Distribute connected components across threads
-    distribute_ccs(cc, access_pattern, access_length, i);
+    //distribute_ccs(cc, access_pattern, access_length, i);
   }
+  for (int i = 0; i < ts.size(); i++) ts[i].join();
+  cout << t2.elapsed() << endl;
 
   /*int num_work = 0;
   //for (int j = 0; j < n_batches; j++) {
@@ -282,9 +310,8 @@ void cyclades_movielens_completion() {
   exit(0);*/
 
   //Perform cyclades
-  Timer t;
+  Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    if (t.elapsed() >= TIME_LIMIT) break;
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
@@ -296,14 +323,17 @@ void cyclades_movielens_completion() {
       thread_batch_on[j] = 0;
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
+    //cout << i << " " << compute_loss(points) << " " << t.elapsed() << endl;
   }
-  cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
+  cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
+  cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
   cout << "LOSS: " << compute_loss(points) << endl;;
   //cout << t.elapsed() << endl;
   //cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
+  Timer overall;
   //Get data
   vector<DataPoint> points = get_movielens_data();
   random_shuffle(points.begin(), points.end());
@@ -325,10 +355,26 @@ void hogwild_completion() {
     access_length[i][0] = n_points_per_thread;
   }
 
+  /*int num_work = 0;
+  //for (int j = 0; j < n_batches; j++) {
+  for (int j = 0; j < 1; j++) {
+      cout << "BATCH " << j << endl;
+    for (int i = 0; i < NTHREAD; i++) {
+      cout << access_length[i][j] << " : ";
+      cout << "THREAD " << i << endl;
+      num_work += access_length[i][j];
+      for (int k = 0; k < min(10, access_length[i][j]); k++) {
+	cout << access_pattern[i][j][k] << " ";
+      }
+      cout << endl;
+    }
+  }
+  cout << "TOT WORK " << num_work << endl;
+  exit(0);*/
+
   //Divide to threads
-  Timer t;
+  Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    if (t.elapsed() >= TIME_LIMIT) break;
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
@@ -337,10 +383,11 @@ void hogwild_completion() {
       threads[j].join();
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
+    //cout << i << " " << compute_loss(points) << " " << t.elapsed() << endl;
   }
-  //cout << "HOGWILD GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;
-  //cout << t.elapsed() << endl;
+  cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
+  cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  cout << "LOSS: " << compute_loss(points) << endl;
   cout << compute_loss(points) << endl;
 }
 

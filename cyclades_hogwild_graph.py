@@ -43,6 +43,11 @@ def run_cyclades_params(command, n_rep, args):
     print(command+": Average Time: ", avg)
     return avg
 
+def run_cyclades_params_and_get_output(command, args):
+    # Compile first
+    Popen(["make", command+"_comp"] + args, stdout=PIPE).communicate()[0]
+    return Popen(["make", command+"_run"] + args, stdout=PIPE).communicate()[0].strip().split()
+
 def plotdata_across_grad_cost(n_epoch, grad_cost_range):
     cyc_avgs, cyc_no_sync_avgs, hog_avgs = [], [], []
     for grad_cost in grad_cost_range:
@@ -75,14 +80,25 @@ def plotdata_across_epochs(grad_cost, epoch_range):
 
 def plotloss_across_epochs(epoch_range):
     cyc_avgs, hog_avgs = [], []
-    for t_limit in epoch_range:
-        cyc_loss_avg = run_cyclades_params("cyc_movielens_cyc", N_REP, ["TIME_LIMIT="+str(t_limit)," N_EPOCHS=1000000000000"])
-        hog_loss_avg = run_cyclades_params("cyc_movielens_hog", N_REP, ["TIME_LIMIT="+str(t_limit)," N_EPOCHS=1000000000000"])
+    cyc_epoch_time_pairs = run_cyclades_params_and_get_output("cyc_movielens_cyc", ["N_EPOCHS="+str(epoch_range)])
+    hog_epoch_time_pairs = run_cyclades_params_and_get_output("cyc_movielens_hog", ["N_EPOCHS="+str(epoch_range)])
 
-        cyc_avgs.append((t_limit, cyc_loss_avg))
-        hog_avgs.append((t_limit, hog_loss_avg))
-    plt.plot(*zip(*cyc_avgs), color='r', label="cyc_loss_avgs")
-    plt.plot(*zip(*hog_avgs), color='b', label="hog_loss_avgs")
+    epochs = [cyc_epoch_time_pairs[i] for i in range(0, len(cyc_epoch_time_pairs), 3)]
+    cyc_losses = [cyc_epoch_time_pairs[i] for i in range(1, len(cyc_epoch_time_pairs), 3)]
+    hog_losses = [hog_epoch_time_pairs[i] for i in range(1, len(hog_epoch_time_pairs), 3)]
+    cyc_times = [cyc_epoch_time_pairs[i] for i in range(2, len(cyc_epoch_time_pairs), 3)]
+    hog_times = [hog_epoch_time_pairs[i] for i in range(2, len(hog_epoch_time_pairs), 3)]
+    
+    print(epochs, cyc_times)
+    #plt.plot(cyc_times, cyc_losses, color='r', label="cyc_loss_avgs")
+   #plt.plot(hog_times, hog_losses, color='b', label="hog_loss_avgs")
+    plt.plot(epochs, cyc_times, color='r', label="cyc")
+    plt.plot(epochs, hog_times, color='b', label="hog")
+
+    #for i, val in enumerate(epochs):
+    #    plt.plot([cyc_times[i]], [cyc_losses[i]], marker="o", color="y")
+    #    plt.plot([hog_times[i]], [hog_losses[i]], marker="o", color="y")
+
     plt.legend(loc='upper left')
     plt.savefig("figure.png")
 
@@ -93,4 +109,4 @@ def plotloss_across_epochs(epoch_range):
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
 #plotdata_across_epochs(1, list(range(1, 500, 10)))
-plotloss_across_epochs(list(np.arange(.1, 1, .1)) + list(np.arange(1,5,1)))
+plotloss_across_epochs(50)
