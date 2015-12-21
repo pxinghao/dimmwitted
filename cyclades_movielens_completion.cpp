@@ -30,7 +30,7 @@
 #ifndef N_EPOCHS
 #define N_EPOCHS 20
 #endif
-#define BATCH_SIZE 200
+#define BATCH_SIZE 1000
 #define NTHREAD 8
 
 #define RLENGTH 30
@@ -41,6 +41,13 @@ double C = 0;
 using namespace std;
 
 typedef tuple<int, int, double> DataPoint;
+
+struct Comp
+{
+  bool operator()(const pair<int, int>& s1, const pair<int, int>& s2) {
+    return s1.second > s2.second;
+  }
+};
 
 int volatile thread_batch_on[NTHREAD];
 
@@ -129,22 +136,34 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
 }
 
 void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum) {
+  int chosen_threads[ccs.size()];
   int total_size_needed[NTHREAD];
   int count = 0;
+  vector<pair<int, int> > balances;
 
-  for (int i = 0; i < NTHREAD; i++) total_size_needed[i] = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    total_size_needed[i] = 0;
+    balances.push_back(pair<int, int>(i, 0));
+  }
+
+  make_heap(balances.begin(), balances.end(), Comp());
 
   //Count total size needed for each access pattern
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
+    pair<int, int> best_balance = balances.front();
+    int chosen_thread = best_balance.first;
+    chosen_threads[count] = chosen_thread;
+    pop_heap(balances.begin(), balances.end(), Comp()); balances.pop_back();
     vector<int> cc = it->second;
-    int chosen_thread = count % NTHREAD;
     total_size_needed[chosen_thread] += cc.size();
+    best_balance.second += cc.size();
+    balances.push_back(best_balance); push_heap(balances.begin(), balances.end(), Comp());
   }
     
   //Allocate memory
   int index_count[NTHREAD];
   for (int i = 0; i < NTHREAD; i++) {
-    int numa_node = i / (NTHREAD / N_NUMA_NODES);
+    int numa_node = i % 2;
     numa_run_on_node(numa_node);
     numa_set_localalloc();
     access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
@@ -156,7 +175,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
   count = 0;  
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
     vector<int> cc = it->second;
-    int chosen_thread = count % NTHREAD;
+    int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
       access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
     }
@@ -179,6 +198,7 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   //CC
   vector<int> components(end-start + N_MOVIES + N_USERS);
   int num_total_components = boost::connected_components(g, &components[0]);
+
 
   map<int, vector<int> > CCs;
   //set<int> cids;
@@ -215,7 +235,8 @@ void cyclades_movielens_completion() {
   
   //Read data nonzero data points
   vector<DataPoint> points = get_movielens_data();
-  
+  random_shuffle(points.begin(), points.end());
+
   //Access pattern generation
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
 
@@ -244,11 +265,12 @@ void cyclades_movielens_completion() {
   }
 
   /*int num_work = 0;
-  for (int i = 0; i < NTHREAD; i++) {
-    cout << "THREAD " << i << endl;
-    for (int j = 0; j < n_batches; j++) {
+  //for (int j = 0; j < n_batches; j++) {
+  for (int j = 0; j < 1; j++) {
       cout << "BATCH " << j << endl;
+    for (int i = 0; i < NTHREAD; i++) {
       cout << access_length[i][j] << " : ";
+      cout << "THREAD " << i << endl;
       num_work += access_length[i][j];
       for (int k = 0; k < min(10, access_length[i][j]); k++) {
 	cout << access_pattern[i][j][k] << " ";
@@ -275,16 +297,16 @@ void cyclades_movielens_completion() {
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
   }
-  //cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;;
+  cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
+  cout << "LOSS: " << compute_loss(points) << endl;;
   //cout << t.elapsed() << endl;
-  cout << compute_loss(points) << endl;
+  //cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
   //Get data
   vector<DataPoint> points = get_movielens_data();
-  //random_shuffle(points.begin(), points.end());
+  random_shuffle(points.begin(), points.end());
 
   //Hogwild access pattern construction
   vector<vector<int *> > access_pattern(NTHREAD);
@@ -323,7 +345,7 @@ void hogwild_completion() {
 }
 
 int main(void) {
-  srand(time(NULL));
+  srand(0);
   for (int i = 0; i < RLENGTH; i++) {
     for (int j = 0; j < N_USERS; j++) {
       v_model[j][i] = ((double)rand()/(double)RAND_MAX);
