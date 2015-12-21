@@ -3,7 +3,6 @@
 #include <vector>
 #include <fstream>
 #include <string>
-#include <thread>
 #include <algorithm> 
 #include <math.h>
 #include <time.h>
@@ -17,12 +16,12 @@
 #define N_MOVIES 1683
 
 #define N_NUMA_NODES 2
-#define N_EPOCHS 10
-#define BATCH_SIZE 2000
-#define NTHREAD 4
+#define N_EPOCHS 100
+#define BATCH_SIZE 200
+#define NTHREAD 8
 #define GAMMA .0001
 
-#define RLENGTH 20
+#define RLENGTH 200
 
 using namespace std;
 
@@ -33,7 +32,7 @@ int volatile thread_batch_on[NTHREAD];
 //Initialize v and h matrix models
 //double ** v_model, **rmodel;
 double volatile v_model[N_USERS][RLENGTH];
-double volatile u_model[RLENGTH][N_MOVIES];
+double volatile u_model[N_MOVIES][RLENGTH];
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
@@ -41,7 +40,7 @@ double compute_loss(vector<DataPoint> &p) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
     for (int i = 0; i < RLENGTH; i++) {
-      dp += v_model[x][i] * u_model[i][y];
+      dp += v_model[x][i] * u_model[y][i];
     }
     double diff = r - dp;
     loss += diff * diff;
@@ -50,8 +49,9 @@ double compute_loss(vector<DataPoint> &p) {
 }
 
 void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
-  for (int batch = 0; batch < access_pattern.size(); batch++) {
-    
+
+  for (int batch = 0; batch < access_length.size(); batch++) {
+
     //Wait for all threads to be on the same batch
     thread_batch_on[thread_id] = batch;    
     int waiting_for_other_threads = 1;
@@ -73,16 +73,16 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
       double r = get<2>(p);
       double gradient = 0;
       for (int j = 0; j < RLENGTH; j++) {
-	gradient += v_model[x][j] * u_model[j][y];
+	gradient += v_model[x][j] * u_model[y][j];
       }
       gradient -= r;
 
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
 	double new_v = v_model[x][j] - GAMMA * gradient;
-	double new_u = u_model[j][y] - GAMMA * gradient;
+	double new_u = u_model[y][j] - GAMMA * gradient;
 	v_model[x][j] = new_v;
-	u_model[j][y] = new_u;
+	u_model[y][j] = new_u;
       }
     }
   }
@@ -148,7 +148,7 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   //cout << cids.size() << endl;
 
   return CCs;
-}
+ }
 
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
@@ -197,18 +197,21 @@ void cyclades_movielens_completion() {
     distribute_ccs(cc, access_pattern, access_length, i);
   }
 
-  /*for (int i = 0; i < NTHREAD; i++) {
+  /*int num_work = 0;
+  for (int i = 0; i < NTHREAD; i++) {
     cout << "THREAD " << i << endl;
     for (int j = 0; j < n_batches; j++) {
       cout << "BATCH " << j << endl;
       cout << access_length[i][j] << " : ";
+      num_work += access_length[i][j];
       for (int k = 0; k < min(10, access_length[i][j]); k++) {
 	cout << access_pattern[i][j][k] << " ";
       }
       cout << endl;
     }
-    }*/
-  exit(0);
+  }
+  cout << "TOT WORK " << num_work << endl;
+  exit(0);*/
 
   //Perform cyclades
   Timer t;
@@ -217,15 +220,15 @@ void cyclades_movielens_completion() {
     for (int j = 0; j < NTHREAD; j++) {
       threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
     }
-    for (int j = 0; j < NTHREAD; j++) {
+    for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
     }
     for (int j = 0; j < NTHREAD; j++) {
       thread_batch_on[j] = 0;
     }
-    cout << compute_loss(points) << endl;;
+    //cout << compute_loss(points) << endl;;
   }
-  cout << "ELAPSED TIME: " << t.elapsed() << endl;
+  cout << "GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
   cout << "LOSS: " << compute_loss(points) << endl;;
 }
 
