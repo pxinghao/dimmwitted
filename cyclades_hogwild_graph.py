@@ -4,7 +4,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from subprocess import Popen, PIPE
 
-N_REP = 10
+N_REP = 1
 
 def run_cyclades(command, n_rep, n_epochs, grad_cost):
     # Compile first
@@ -25,6 +25,25 @@ def run_cyclades(command, n_rep, n_epochs, grad_cost):
     print(command+": Average Time: ", avg, " Loss ", avg_loss)
     return avg
 
+def run_cyclades_get_time_loss(command, n_epochs, n_rep):
+    # Compile first
+    Popen(["make", command+"_comp", "N_EPOCHS="+str(n_epochs)], stdout=PIPE).communicate()[0]
+
+    # Take vareage of n_rep iterations
+    avg = 0
+    avg_loss = 0
+    for i in range(n_rep):
+        outputs = Popen(["make", command+"_run", "N_EPOCHS="+str(n_epochs)], stdout=PIPE).communicate()[0].strip().split()
+        time, loss = float(outputs[0]), float(outputs[1])
+        avg += time
+        avg_loss += loss
+    avg  = avg / float(n_rep)
+    avg_loss = avg_loss / float(n_rep)
+
+    # Return avg
+    print(command+": Average Time: ", avg, " Loss ", avg_loss)
+    return avg, avg_loss
+    
 def plotdata_across_grad_cost(n_epoch, grad_cost_range):
     cyc_avgs, cyc_no_sync_avgs, hog_avgs = [], [], []
     for grad_cost in grad_cost_range:
@@ -55,11 +74,23 @@ def plotdata_across_epochs(grad_cost, epoch_range):
     plt.legend(loc='upper left')
     plt.savefig("figure.png")
 
+def plotloss_across_epochs(epoch_range):
+    cyc_avgs, hog_avgs = [], []
+    for n_epoch in epoch_range:
+        t1, cyc_loss_avg = run_cyclades_get_time_loss("cyc_movielens_cyc", n_epoch, N_REP)
+        t2, hog_loss_avg = run_cyclades_get_time_loss("cyc_movielens_hog", n_epoch, N_REP)
+        cyc_avgs.append((t1, cyc_loss_avg))
+        hog_avgs.append((t2, hog_loss_avg))
+    plt.plot(*zip(*cyc_avgs), color='r', label="cyc_loss_avgs")
+    plt.plot(*zip(*hog_avgs), color='b', label="hog_loss_avgs")
+    plt.legend(loc='upper left')
+    plt.savefig("figure.png")
 
 #run_cyclades("cyc_model_dup", 10, 10, 1);
-run_cyclades("cyc", 10, 10, 1);
-run_cyclades("cyc_no_sync", 10, 10, 1);
-run_cyclades("hog", 10, 10, 1);
+#run_cyclades("cyc", 10, 10, 1);
+#run_cyclades("cyc_no_sync", 10, 10, 1);
+#run_cyclades("hog", 10, 10, 1);
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
 #plotdata_across_epochs(1, list(range(1, 500, 10)))
+plotloss_across_epochs(list(range(20, 80)))

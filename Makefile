@@ -31,10 +31,24 @@ CPP_LAST =
 
 endif
 
-cyc_movielens_completion:
-	rm -rf movielens_completion
-	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_completion
-	numactl --interleave=0,1 ./movielens_completion
+cyc_movielens_completion_hog:
+	rm -rf movielens_completion_hog
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -o movielens_completion_hog
+	numactl --interleave=0,1 ./movielens_completion_hog
+cyc_movielens_completion_cyc:
+	rm -rf movielens_completion_cyc
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -o movielens_completion_cyc
+	numactl --interleave=0,1 ./movielens_completion_cyc
+cyc_movielens_hog_comp:
+	@rm -rf movielens_completion_hog
+	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -DN_EPOCHS=$(N_EPOCHS) -o movielens_completion_hog
+cyc_movielens_cyc_comp:
+	@rm -rf movielens_completion_cyc
+	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -DN_EPOCHS=$(N_EPOCHS) -o movielens_completion_cyc
+cyc_movielens_hog_run:
+	@numactl --interleave=0,1 ./movielens_completion_hog
+cyc_movielens_cyc_run:
+	@numactl --interleave=0,1 ./movielens_completion_cyc
 
 cyc_movielens_sgd:
 	rm  -rf movielens_cyc

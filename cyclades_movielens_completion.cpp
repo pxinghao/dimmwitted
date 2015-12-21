@@ -12,16 +12,25 @@
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
+#ifndef CYC
+#define CYC 0
+#endif
+#ifndef HOG
+#define HOG 0
+#endif
+
 #define N_USERS 944
 #define N_MOVIES 1683
 
 #define N_NUMA_NODES 2
-#define N_EPOCHS 100
+#ifndef N_EPOCHS
+#define N_EPOCHS 50
+#endif
 #define BATCH_SIZE 200
 #define NTHREAD 8
 #define GAMMA .0001
 
-#define RLENGTH 200
+#define RLENGTH 20
 
 using namespace std;
 
@@ -49,7 +58,6 @@ double compute_loss(vector<DataPoint> &p) {
 }
 
 void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
-
   for (int batch = 0; batch < access_length.size(); batch++) {
 
     //Wait for all threads to be on the same batch
@@ -65,6 +73,32 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
       }
     }
     
+    //For every data point in the connected component
+    for (int i = 0; i < access_length[batch]; i++) {
+      //Compute gradient
+      DataPoint p = points[access_pattern[batch][i]];
+      int x = get<0>(p), y = get<1>(p);
+      double r = get<2>(p);
+      double gradient = 0;
+      for (int j = 0; j < RLENGTH; j++) {
+	gradient += v_model[x][j] * u_model[y][j];
+      }
+      gradient -= r;
+
+      //Perform updates
+      for (int j = 0; j < RLENGTH; j++) {
+	double new_v = v_model[x][j] - GAMMA * gradient;
+	double new_u = u_model[y][j] - GAMMA * gradient;
+	v_model[x][j] = new_v;
+	u_model[y][j] = new_u;
+      }
+    }
+  }
+}
+
+void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
+  for (int batch = 0; batch < access_length.size(); batch++) {
+
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
@@ -142,10 +176,8 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   map<int, vector<int> > CCs;
   //set<int> cids;
   for (int i = 0; i < end-start; i++) {
-    //cids.insert(components[i]);
     CCs[components[i]].push_back(i + start);
   }
-  //cout << cids.size() << endl;
 
   return CCs;
  }
@@ -169,7 +201,6 @@ void cyclades_movielens_completion() {
   
   //Read data nonzero data points
   vector<DataPoint> points = get_movielens_data();
-
   
   //Access pattern generation
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
@@ -183,6 +214,7 @@ void cyclades_movielens_completion() {
     access_pattern[i].resize(n_batches);
     access_length[i].resize(n_batches);
   }
+
 
   //CC Generation
   for (int i = 0; i < n_batches; i++) {
@@ -228,8 +260,51 @@ void cyclades_movielens_completion() {
     }
     //cout << compute_loss(points) << endl;;
   }
-  cout << "GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
-  cout << "LOSS: " << compute_loss(points) << endl;;
+  //cout << "CYCLADES GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;;
+  cout << t.elapsed() << endl;
+  cout << compute_loss(points) << endl;
+}
+
+void hogwild_completion() {
+  //Get data
+  vector<DataPoint> points = get_movielens_data();
+  random_shuffle(points.begin(), points.end());
+
+  //Hogwild access pattern construction
+  vector<vector<int *> > access_pattern(NTHREAD);
+  vector<vector<int > > access_length(NTHREAD);
+
+  int n_points_per_thread = points.size() / NTHREAD;
+  for (int i = 0; i < NTHREAD; i++) {
+    //No batches in hogwild, so treat it as all 1 batch
+    access_pattern[i].resize(1);
+    access_length[i].resize(1);
+
+    int start_point = i;
+    int end_point = min(i + n_points_per_thread, (int)points.size());
+    access_pattern[i][0] = (int *)malloc(sizeof(int) * (end_point-start_point));
+    for (int j = start_point; j < end_point; j++) {
+      access_pattern[i][0][j-start_point] = j;
+    }
+    access_length[i][0] = end_point-start_point;
+  }
+
+  //Divide to threads
+  Timer t;
+  for (int i = 0; i < N_EPOCHS; i++) {
+    vector<thread> threads;
+    for (int j = 0; j < NTHREAD; j++) {
+      threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
+    }
+    for (int j = 0; j < threads.size(); j++) {
+      threads[j].join();
+    }
+  }
+  //cout << "HOGWILD GRADIENT ELAPSED TIME: " << t.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;
+  cout << t.elapsed() << endl;
+  cout << compute_loss(points) << endl;
 }
 
 int main(void) {
@@ -238,8 +313,11 @@ int main(void) {
       v_model[j][i] = 0;
     }
     for (int j = 0; j < N_MOVIES; j++) {
-      u_model[i][j] = 0;
+      u_model[j][i] = 0;
     }
   }
-  cyclades_movielens_completion();
+  if (CYC)
+    cyclades_movielens_completion();
+  if (HOG)
+    hogwild_completion();
 }
