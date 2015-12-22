@@ -351,7 +351,7 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
       numa_run_on_node(0);
     }
     else {
-      numa_run_on_node(ithread / (NTHREAD / N_NUMA_NODES));
+      numa_run_on_node(ithread % N_NUMA_NODES);
     }
     numa_set_localalloc();
     numa_aware_indices[ithread] = new int[NELEMS[ithread]];
@@ -406,7 +406,7 @@ void cyclades_no_sync_or_hogwild_benchmark(int should_cyc_no_sync) {
 	numa_run_on_node(0);
       }
       else {
-	numa_run_on_node(i / (NTHREAD / N_NUMA_NODES));
+	numa_run_on_node(i % N_NUMA_NODES);
       }
       if (should_cyc_no_sync) {
 	//threads.push_back(thread(_do_simulation, &indices[0], &p_nelems[0], &p_examples[0], numa_aware_indices[i], NELEMS[i], i));       
@@ -479,7 +479,7 @@ void cyclades_benchmark() {
       numa_run_on_node(0);
     }
     else {
-      numa_run_on_node(ithread / (NTHREAD / N_NUMA_NODES));
+      numa_run_on_node(ithread % N_NUMA_NODES);
     }
     numa_set_localalloc();
     for (int i = 0; i < n_batches; i++) {
@@ -522,7 +522,7 @@ void cyclades_benchmark() {
 	numa_run_on_node(0);
       }
       else {
-	numa_run_on_node(i / (NTHREAD / N_NUMA_NODES));
+	numa_run_on_node(i % N_NUMA_NODES);
       }
       threads.push_back(thread(_do_cyclades_gradient, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], (int **)numa_aware_indices[i], (int *)NELEMS[i], i, n_batches));
     }
@@ -589,7 +589,7 @@ void cyclades_benchmark_model_dup() {
       numa_run_on_node(0);
     }
     else {
-      numa_run_on_node(ithread / (NTHREAD / N_NUMA_NODES));
+      numa_run_on_node(ithread %  N_NUMA_NODES);
     }
     numa_set_localalloc();
     for (int i = 0; i < n_batches; i++) {
@@ -625,7 +625,7 @@ void cyclades_benchmark_model_dup() {
 
   //Prepare for model duplication
   for (int i = 0; i < N_NUMA_NODES; i++) {
-    int node_run_on = NTHREAD == 1 ? 0 : i / (NTHREAD / N_NUMA_NODES);
+    int node_run_on = NTHREAD == 1 ? 0 : i % N_NUMA_NODES;
     numa_run_on_node(node_run_on);
     numa_set_localalloc();
     model_part[i] = (int *)numa_alloc_onnode(MODEL_SIZE * sizeof(int), node_run_on);
@@ -636,9 +636,9 @@ void cyclades_benchmark_model_dup() {
   for(int iepoch = 0; iepoch < N_EPOCHS; iepoch++){
     vector<thread> threads;
     for(int i = 0 ; i < NTHREAD; i++) {
-      int node_run_on = NTHREAD == 1 ? 0 : i / (NTHREAD / N_NUMA_NODES);
+      int node_run_on = NTHREAD == 1 ? 0 : i % N_NUMA_NODES;
       numa_run_on_node(node_run_on);
-      threads.push_back(thread(_do_cyclades_gradient_model_rep, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], (int **)numa_aware_indices[i], (int *)NELEMS[i], i, n_batches, node_run_on, i % (NTHREAD / N_NUMA_NODES) == 0, (int *)model_part[node_run_on]));
+      threads.push_back(thread(_do_cyclades_gradient_model_rep, random_sparse_data, target_values, &indices[0], &p_nelems[0], &p_examples[0], (int **)numa_aware_indices[i], (int *)NELEMS[i], i, n_batches, node_run_on, i % N_NUMA_NODES == 0, (int *)model_part[node_run_on]));
     }
     for(int i = 0; i < threads.size(); i++){
       threads[i].join();

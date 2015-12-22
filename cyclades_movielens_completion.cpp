@@ -8,7 +8,6 @@
 #include <time.h>
 #include <map>
 #include <unistd.h>
-#include "ConnectedComponents/CC_allocation.h"
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
@@ -28,14 +27,17 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 100
 #endif
-#define BATCH_SIZE 500
-#define NTHREAD 16
+#define BATCH_SIZE 1000
+
+#ifndef NTHREAD
+#define NTHREAD 8
+#endif
 
 #define RLENGTH 30
-#define GAMMA_REDUCTION_FACTOR .8
-double GAMMA = 5e-2;
+#define GAMMA_REDUCTION_FACTOR .95
+double GAMMA = 8e-2;
 double C = 0;
 
 using namespace std;
@@ -164,8 +166,6 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
     balances.push_back(pair<int, int>(i, 0));
   }
 
-  make_heap(balances.begin(), balances.end(), Comp());
-
   //Count total size needed for each access pattern
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
     pair<int, int> best_balance = balances.front();
@@ -177,18 +177,19 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
     best_balance.second += cc.size();
     balances.push_back(best_balance); push_heap(balances.begin(), balances.end(), Comp());
   }
-    
+
   //Allocate memory
   int index_count[NTHREAD];
   for (int i = 0; i < NTHREAD; i++) {
-    int numa_node = i % 2;
+    int numa_node = i % N_NUMA_NODES;
     numa_run_on_node(numa_node);
     numa_set_localalloc();
     access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
+    //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
   }
-  
+
   //Copy memory over
   count = 0;  
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
@@ -201,6 +202,21 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
   }
 }
 
+int union_find(int a, int *p) {
+  int root = a;
+  while ( p[a] != a) {
+    a = p[a];
+  }
+  while ( root != a) {
+    
+    int root2 = p[root];
+    p[root] = a;
+    root = root2;
+  }
+  
+  return a;
+}
+
 map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end) {
   //Numeric ordering:
   //Note: points.size() to mean end-start
@@ -208,6 +224,9 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   //user vars - [points.size() ... points.size() + N_USERS]
   //movie vars - [points.size() + N_USERS .... end]
   boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS> g (end-start + N_MOVIES + N_USERS);
+  /*map<int, int> coordinate_id_map;
+  int cur_coord_id = 0;
+
   for (int i = 0; i < end-start; i++) {
     boost::add_edge(i, end-start+get<0>(points[i+start]), g);
     boost::add_edge(i, end-start+N_USERS+get<1>(points[i+start]), g);
@@ -215,21 +234,43 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   
   //CC
   vector<int> components(end-start + N_MOVIES + N_USERS);
-  int num_total_components = boost::connected_components(g, &components[0]);
 
-
+  int num_total_components = boost::connected_components(g, &components[0]);*/
+  int tree[end-start + N_MOVIES + N_USERS];
+  for (int i = 0; i < end-start + N_MOVIES + N_USERS; i++) 
+    tree[i] = i;
+  for (int i = start; i < end; i++) {
+    DataPoint p = points[i];
+    int src = i-start;
+    int e1 = get<0>(p) + end-start;
+    int e2 = get<1>(p) + end-start+N_USERS;
+    int c1 = union_find(src, tree);
+    int c2 = union_find(e1, tree);
+    int c3 = union_find(e2, tree);
+    tree[c3] = c1;
+    tree[c2] = c1;
+  }
+  
   map<int, vector<int> > CCs;
+
   //set<int> cids;
   for (int i = 0; i < end-start; i++) {
-    CCs[components[i]].push_back(i + start);
+    CCs[union_find(i, tree)].push_back(i + start);
+    //CCs[components[i]].push_back(i + start);
   }
 
   return CCs;
  }
 
 void threaded_distribute_ccs(vector<DataPoint> &points, int start, int end, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum) {
+  //Timer cc1;
   map<int, vector<int> > cc = compute_CC(points, start, end);
+  //cout << cc1.elapsed() << endl;
+  //cout << "COMPUTE CC " << cc1.elapsed() << endl;
+  //Timer cc2;
   distribute_ccs(cc, access_pattern, access_length, batchnum);
+  //cout << cc2.elapsed() << endl;
+  //cout << " ALLOC " << cc2.elapsed() << endl;
 }
 
 vector<DataPoint> get_movielens_data() {
@@ -255,11 +296,12 @@ vector<DataPoint> get_movielens_data() {
 }
 
 void cyclades_movielens_completion() {
-  Timer overall;  
 
   //Read data nonzero data points
   vector<DataPoint> points = get_movielens_data();
   random_shuffle(points.begin(), points.end());
+
+  Timer overall;  
 
   //Access pattern generation
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
@@ -277,20 +319,28 @@ void cyclades_movielens_completion() {
   //CC Generation
   Timer t2;
   vector<thread> ts;
+  double cc_time = 0, alloc_time = 0;
+
   for (int i = 0; i < n_batches; i++) {
     
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
 
-    ts.push_back(thread(threaded_distribute_ccs, ref(points), start, end, ref(access_pattern), ref(access_length), i));
+    //ts.push_back(thread(threaded_distribute_ccs, ref(points), start, end, ref(access_pattern), ref(access_length), i));
+    //threaded_distribute_ccs(points, start, end, access_pattern, access_length, i);
     ///Compute connected components of data points
-    //map<int, vector<int> > cc = compute_CC(points, start, end);
+    //Timer ttt;
+    map<int, vector<int> > cc = compute_CC(points, start, end);
+    //cc_time += ttt.elapsed();
 
     //Distribute connected components across threads
-    //distribute_ccs(cc, access_pattern, access_length, i);
+    //Timer ttt2;
+    distribute_ccs(cc, access_pattern, access_length, i);
+    //alloc_time += ttt2.elapsed();
   }
+  //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
-  cout << t2.elapsed() << endl;
+  //cout << cc_time << " " << alloc_time << endl;
 
   /*int num_work = 0;
   //for (int j = 0; j < n_batches; j++) {
@@ -323,37 +373,45 @@ void cyclades_movielens_completion() {
       thread_batch_on[j] = 0;
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    //cout << i << " " << compute_loss(points) << " " << t.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
-  cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
-  cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  cout << "LOSS: " << compute_loss(points) << endl;;
-  //cout << t.elapsed() << endl;
-  //cout << compute_loss(points) << endl;
+  //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
+  //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;;
+  //cout << overall.elapsed() << endl;
+  cout << gradient_time.elapsed() << endl;
+  cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
-  Timer overall;
   //Get data
   vector<DataPoint> points = get_movielens_data();
   random_shuffle(points.begin(), points.end());
+
+  Timer overall;
 
   //Hogwild access pattern construction
   vector<vector<int *> > access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
 
+  //Timer t2;
   int n_points_per_thread = points.size() / NTHREAD;
   for (int i = 0; i < NTHREAD; i++) {
     //No batches in hogwild, so treat it as all 1 batch
     access_pattern[i].resize(1);
     access_length[i].resize(1);
 
+    int start = i * n_points_per_thread;
+    int end = min(i * n_points_per_thread + n_points_per_thread, (int)points.size());
+
     access_pattern[i][0] = (int *)malloc(sizeof(int) * n_points_per_thread);
-    for (int j = 0; j < n_points_per_thread; j++) {
-      access_pattern[i][0][j] = rand() % points.size();
+    for (int j = start; j < end; j++) {
+      access_pattern[i][0][j-start] = j;
     }
     access_length[i][0] = n_points_per_thread;
   }
+  //cout << "ALLOCATION TIME " << t2.elapsed() << endl;
 
   /*int num_work = 0;
   //for (int j = 0; j < n_batches; j++) {
@@ -383,11 +441,14 @@ void hogwild_completion() {
       threads[j].join();
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    //cout << i << " " << compute_loss(points) << " " << t.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
-  cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
-  cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  cout << "LOSS: " << compute_loss(points) << endl;
+  //cout << overall.elapsed() << endl;
+  //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
+  //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;
+  cout << gradient_time.elapsed() << endl;
   cout << compute_loss(points) << endl;
 }
 
