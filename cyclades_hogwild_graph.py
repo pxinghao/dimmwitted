@@ -106,14 +106,14 @@ def plotloss_across_epochs(epoch_range, n_rep):
     cyc_times = [x / float(n_rep) for x in cyc_times]
     hog_times = [x / float(n_rep) for x in hog_times]
     
-    plt.plot(cyc_times, cyc_losses, color='r', label="cyc_loss_avgs")
-    plt.plot(hog_times, hog_losses, color='b', label="hog_loss_avgs")
+    plt.plot(cyc_times[100:], cyc_losses[100:], color='r', label="cyc_loss_avgs")
+    plt.plot(hog_times[100:], hog_losses[100:], color='b', label="hog_loss_avgs")
     #plt.plot(epochs, cyc_times, color='r', label="cyc")
     #plt.plot(epochs, hog_times, color='b', label="hog")
 
-    for i, val in enumerate(epochs):
-        plt.plot([cyc_times[i]], [cyc_losses[i]], marker="o", color="y")
-        plt.plot([hog_times[i]], [hog_losses[i]], marker="o", color="y")
+    #for i, val in enumerate(epochs):
+    #    plt.plot([cyc_times[i]], [cyc_losses[i]], marker="o", color="y")
+    #    plt.plot([hog_times[i]], [hog_losses[i]], marker="o", color="y")
 
     plt.legend(loc='upper left')
     plt.savefig("figure.png")
@@ -140,7 +140,7 @@ def plotspeedups(epochs, thread_range):
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
 
-#plotloss_across_epochs(50, 1)
+plotloss_across_epochs(200, 1)
 
-plotdata_across_epochs(1, [5, 10, 50, 100, 150, 200, 300, 400, 500])
+#plotdata_across_epochs(2, [5, 10, 50, 100, 150])
 #plotspeedups(50, list(range(1, 32)));

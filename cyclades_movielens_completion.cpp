@@ -1,4 +1,5 @@
 #include <iostream>
+#include <stack>
 #include "src/util.h"
 #include <vector>
 #include <fstream>
@@ -37,7 +38,7 @@
 
 #define RLENGTH 30
 #define GAMMA_REDUCTION_FACTOR .95
-double GAMMA = 8e-2;
+double GAMMA = 8e-5;
 double C = 0;
 
 using namespace std;
@@ -129,7 +130,7 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
   }
 }
 
-void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_pattern, vector<int> &access_length, int thread_id) {
+void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_pattern, vector<int> &access_length, int thread_id, int epoch_parity) {
   //Keep track of local model
   double local_v_model[N_USERS][RLENGTH];
   double local_u_model[N_MOVIES][RLENGTH];
@@ -145,7 +146,7 @@ void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_patter
       }*/
 
     //Wait for all threads to be on the same batch
-    thread_batch_on[thread_id] = batch;    
+    /*thread_batch_on[thread_id] = batch;    
     int waiting_for_other_threads = 1;
     while (waiting_for_other_threads) {
       waiting_for_other_threads = 0;
@@ -155,12 +156,18 @@ void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_patter
 	  break;
 	}
       }
-    }
+      }*/
     
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
-      DataPoint p = access_pattern[batch][i];
+      DataPoint p;
+      if (epoch_parity == 0) {
+	p = access_pattern[batch][i];
+      }
+      else {
+	p = access_pattern[batch][access_length[batch]-1-i];
+      }
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);            
       double gradient = 0;
@@ -276,24 +283,6 @@ int union_find(int a, int *p) {
 }
 
 map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end) {
-  //Numeric ordering:
-  //Note: points.size() to mean end-start
-  //data points - [0 ... points.size()]
-  //user vars - [points.size() ... points.size() + N_USERS]
-  //movie vars - [points.size() + N_USERS .... end]
-  boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS> g (end-start + N_MOVIES + N_USERS);
-  /*map<int, int> coordinate_id_map;
-  int cur_coord_id = 0;
-
-  for (int i = 0; i < end-start; i++) {
-    boost::add_edge(i, end-start+get<0>(points[i+start]), g);
-    boost::add_edge(i, end-start+N_USERS+get<1>(points[i+start]), g);
-  }
-  
-  //CC
-  vector<int> components(end-start + N_MOVIES + N_USERS);
-
-  int num_total_components = boost::connected_components(g, &components[0]);*/
   int tree[end-start + N_MOVIES + N_USERS];
   for (int i = 0; i < end-start + N_MOVIES + N_USERS; i++) 
     tree[i] = i;
@@ -310,12 +299,40 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   }
   
   map<int, vector<int> > CCs;
-
-  //set<int> cids;
   for (int i = 0; i < end-start; i++) {
     CCs[union_find(i, tree)].push_back(i + start);
-    //CCs[components[i]].push_back(i + start);
   }
+
+  /*int labels[end-start + N_MOVIES + N_USERS];
+  for (int i = 0; i < end-start + N_MOVIES + N_USERS; i++) {
+    labels[i] = -1;
+  }
+  /*for (int i = 0; i < end-start; i++) {
+    if (labels[i] == -1) {
+      stack<int> s;
+      s.push(i);
+      while (!s.empty()) {
+	int top = s.top();
+	cout << top << endl;
+	s.pop();
+	labels[top] = i;
+	for (set<int>::iterator it = adj_list[top].begin(); it != adj_list[top].end(); it++) {
+	  int n = *it;
+	  if (n < end-start) cout << "YAYYY" << endl;
+	  if (labels[n] != -1)  {
+	    s.push(n);
+	  }
+	}
+      }
+    }
+    else {
+      cout << "YAY" << endl;
+    }
+    }*/
+  /*map<int, vector<int> > CCs;
+  for (int i = 0; i < end-start; i++) {
+    CCs[labels[i]].push_back(i + start);
+    }*/
 
   return CCs;
  }
@@ -413,7 +430,7 @@ void cyclades_movielens_completion() {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       numa_run_on_node(j % N_NUMA_NODES);
-      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), j));
+      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), j, i % 2));
     }
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
@@ -422,12 +439,12 @@ void cyclades_movielens_completion() {
       thread_batch_on[j] = 0;
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
-  cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
-  cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  cout << "LOSS: " << compute_loss(points) << endl;;
+  //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
+  //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;;
   //cout << overall.elapsed() << endl;
   //cout << gradient_time.elapsed() << endl;
   //cout << compute_loss(points) << endl;
@@ -490,13 +507,13 @@ void hogwild_completion() {
       threads[j].join();
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
   //cout << overall.elapsed() << endl;
-  cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
-  cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  cout << "LOSS: " << compute_loss(points) << endl;
+  //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
+  //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  //cout << "LOSS: " << compute_loss(points) << endl;
   //cout << gradient_time.elapsed() << endl;
   //cout << compute_loss(points) << endl;
 }
