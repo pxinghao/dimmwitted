@@ -105,7 +105,64 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
       //Compute gradient
       DataPoint p = points[access_pattern[batch][i]];
       int x = get<0>(p), y = get<1>(p);
-      double r = get<2>(p);
+      double r = get<2>(p);      
+      double gradient = 0;
+      
+      for (int j = 0; j < RLENGTH; j++) {
+	gradient += v_model[x][j] * u_model[y][j];
+	//gradient += local_v_model[x][j] * local_u_model[y][j];
+      }
+      gradient -= r + C;
+
+      //Perform updates
+      for (int j = 0; j < RLENGTH; j++) {
+	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
+	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
+	v_model[x][j] = new_v;
+	u_model[y][j] = new_u;
+	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
+	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
+	//local_v_model[x][j] = 24;
+	//local_u_model[y][j] = 50;
+      }
+    }
+  }
+}
+
+void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_pattern, vector<int> &access_length, int thread_id) {
+  //Keep track of local model
+  double local_v_model[N_USERS][RLENGTH];
+  double local_u_model[N_MOVIES][RLENGTH];
+
+  for (int batch = 0; batch < access_length.size(); batch++) {
+
+    //Update local model
+    /*for (int i = 0; i < RLENGTH; i++) {
+      for (int j = 0; j < max(N_USERS, N_MOVIES); j++) {
+	if (j < N_USERS) local_v_model[j][i] = v_model[j][i];
+	if (j < N_MOVIES) local_u_model[j][i] = u_model[j][i];
+      }
+      }*/
+
+    //Wait for all threads to be on the same batch
+    thread_batch_on[thread_id] = batch;    
+    int waiting_for_other_threads = 1;
+    while (waiting_for_other_threads) {
+      waiting_for_other_threads = 0;
+      for (int ii = 0; ii < NTHREAD; ii++) {
+	if (thread_batch_on[ii] < batch) {
+	  waiting_for_other_threads = 1;
+	  break;
+	}
+      }
+    }
+    
+    //For every data point in the connected component
+    for (int i = 0; i < access_length[batch]; i++) {
+      //Compute gradient
+      DataPoint p = access_pattern[batch][i];
+      int x = get<0>(p), y = get<1>(p);
+      double r = get<2>(p);            
       double gradient = 0;
       
       for (int j = 0; j < RLENGTH; j++) {
@@ -155,7 +212,7 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
   }
 }
 
-void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum) {
+void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &access_pattern, vector<vector<int> > &access_length, int batchnum, vector<DataPoint> &points) {
   int chosen_threads[ccs.size()];
   int total_size_needed[NTHREAD];
   int count = 0;
@@ -184,7 +241,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
     int numa_node = i % N_NUMA_NODES;
     //numa_run_on_node(numa_node);
     //numa_set_localalloc();
-    access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
+    access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
     //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
@@ -196,7 +253,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
     vector<int> cc = it->second;
     int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
-      access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
+      access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
+      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
     }
     index_count[chosen_thread] += cc.size();
   }
@@ -262,16 +320,6 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   return CCs;
  }
 
-void threaded_distribute_ccs(vector<DataPoint> &points, int start, int end, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum) {
-  //Timer cc1;
-  map<int, vector<int> > cc = compute_CC(points, start, end);
-  //cout << cc1.elapsed() << endl;
-  //cout << "COMPUTE CC " << cc1.elapsed() << endl;
-  //Timer cc2;
-  distribute_ccs(cc, access_pattern, access_length, batchnum);
-  //cout << cc2.elapsed() << endl;
-  //cout << " ALLOC " << cc2.elapsed() << endl;
-}
 
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
@@ -307,7 +355,7 @@ void cyclades_movielens_completion() {
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
 
   //Access pattern of form [thread][batch][point_ids]
-  vector<vector<int *> > access_pattern(NTHREAD);
+  vector<vector<DataPoint *> > access_pattern(NTHREAD);
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
 
@@ -335,7 +383,7 @@ void cyclades_movielens_completion() {
 
     //Distribute connected components across threads
     //Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, i);
+    distribute_ccs(cc, access_pattern, access_length, i, points);
     //alloc_time += ttt2.elapsed();
   }
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
@@ -365,7 +413,7 @@ void cyclades_movielens_completion() {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       numa_run_on_node(j % N_NUMA_NODES);
-      threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
+      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), j));
     }
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
@@ -431,7 +479,7 @@ void hogwild_completion() {
   cout << "TOT WORK " << num_work << endl;
   exit(0);*/
 
-  //Divide to threads
+//Divide to threads
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
