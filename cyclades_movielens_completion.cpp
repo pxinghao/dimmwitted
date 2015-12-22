@@ -27,7 +27,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 50
 #endif
 #define BATCH_SIZE 1000
 
@@ -182,8 +182,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_
   int index_count[NTHREAD];
   for (int i = 0; i < NTHREAD; i++) {
     int numa_node = i % N_NUMA_NODES;
-    numa_run_on_node(numa_node);
-    numa_set_localalloc();
+    //numa_run_on_node(numa_node);
+    //numa_set_localalloc();
     access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
     //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
     access_length[i][batchnum] = total_size_needed[i];
@@ -364,6 +364,7 @@ void cyclades_movielens_completion() {
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
+      numa_run_on_node(j % N_NUMA_NODES);
       threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
     }
     for (int j = 0; j < threads.size(); j++) {
@@ -376,12 +377,12 @@ void cyclades_movielens_completion() {
     //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
-  //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
-  //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;;
+  cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
+  cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  cout << "LOSS: " << compute_loss(points) << endl;;
   //cout << overall.elapsed() << endl;
-  cout << gradient_time.elapsed() << endl;
-  cout << compute_loss(points) << endl;
+  //cout << gradient_time.elapsed() << endl;
+  //cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
@@ -445,11 +446,11 @@ void hogwild_completion() {
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
   //cout << overall.elapsed() << endl;
-  //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
-  //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;
-  cout << gradient_time.elapsed() << endl;
-  cout << compute_loss(points) << endl;
+  cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
+  cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
+  cout << "LOSS: " << compute_loss(points) << endl;
+  //cout << gradient_time.elapsed() << endl;
+  //cout << compute_loss(points) << endl;
 }
 
 int main(void) {
