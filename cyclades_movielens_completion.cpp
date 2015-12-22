@@ -24,19 +24,22 @@
 #endif
 
 #define N_USERS 6041
-#define N_MOVIES 3953
+#define N_MOVIES 3091
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 150
 #endif
-#define BATCH_SIZE 1000
+#define BATCH_SIZE 200
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
-#define RLENGTH 30
+#ifndef RLENGTH
+#define RLENGTH 10
+#endif 
+
 #define GAMMA_REDUCTION_FACTOR .95
 double GAMMA = 8e-5;
 double C = 0;
@@ -74,10 +77,6 @@ double compute_loss(vector<DataPoint> &p) {
 }
 
 void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
-  //Keep track of local model
-  double local_v_model[N_USERS][RLENGTH];
-  double local_u_model[N_MOVIES][RLENGTH];
-
   for (int batch = 0; batch < access_length.size(); batch++) {
 
     //Update local model
@@ -130,10 +129,8 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
   }
 }
 
-void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_pattern, vector<int> &access_length, int thread_id, int epoch_parity) {
+void do_cyclades_gradient_descent_with_points(vector<vector<DataPoint> > &access_pattern, vector<int> &access_length, int thread_id, int epoch_parity) {
   //Keep track of local model
-  double local_v_model[N_USERS][RLENGTH];
-  double local_u_model[N_MOVIES][RLENGTH];
 
   for (int batch = 0; batch < access_length.size(); batch++) {
 
@@ -146,7 +143,7 @@ void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_patter
       }*/
 
     //Wait for all threads to be on the same batch
-    /*thread_batch_on[thread_id] = batch;    
+    thread_batch_on[thread_id] = batch;    
     int waiting_for_other_threads = 1;
     while (waiting_for_other_threads) {
       waiting_for_other_threads = 0;
@@ -156,18 +153,12 @@ void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_patter
 	  break;
 	}
       }
-      }*/
+    }
     
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
-      DataPoint p;
-      if (epoch_parity == 0) {
-	p = access_pattern[batch][i];
-      }
-      else {
-	p = access_pattern[batch][access_length[batch]-1-i];
-      }
+      DataPoint p = access_pattern[batch][i];
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);            
       double gradient = 0;
@@ -219,7 +210,7 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
   }
 }
 
-void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &access_pattern, vector<vector<int> > &access_length, int batchnum, vector<DataPoint> &points) {
+void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<int *> > &access_pattern, vector<vector<int> > &access_length, int batchnum, vector<DataPoint> &points) {
   int chosen_threads[ccs.size()];
   int total_size_needed[NTHREAD];
   int count = 0;
@@ -248,32 +239,37 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &a
     int numa_node = i % N_NUMA_NODES;
     //numa_run_on_node(numa_node);
     //numa_set_localalloc();
-    access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
+    access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
+    //access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
+    //access_pattern[i][batchnum] = vector<DataPoint>(total_size_needed[i]);
     //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
   }
-
   //Copy memory over
   count = 0;  
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
     vector<int> cc = it->second;
     int chosen_thread = chosen_threads[count];
+    //cout << "A" << endl;
     for (int i = 0; i < cc.size(); i++) {
-      access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
-      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
+      //cout << chosen_thread << " " << batchnum << " " << index_count[chosen_thread] << " "  << endl;
+      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
+      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
+      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = DataPoint(1,2,3);
+      access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
     }
+    //cout << "B" << endl;
     index_count[chosen_thread] += cc.size();
   }
 }
 
 int union_find(int a, int *p) {
   int root = a;
-  while ( p[a] != a) {
+  while (p[a] != a) {
     a = p[a];
   }
-  while ( root != a) {
-    
+  while (root != a) {    
     int root2 = p[root];
     p[root] = a;
     root = root2;
@@ -297,54 +293,27 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
     tree[c3] = c1;
     tree[c2] = c1;
   }
-  
+
   map<int, vector<int> > CCs;
   for (int i = 0; i < end-start; i++) {
     CCs[union_find(i, tree)].push_back(i + start);
   }
 
-  /*int labels[end-start + N_MOVIES + N_USERS];
-  for (int i = 0; i < end-start + N_MOVIES + N_USERS; i++) {
-    labels[i] = -1;
-  }
-  /*for (int i = 0; i < end-start; i++) {
-    if (labels[i] == -1) {
-      stack<int> s;
-      s.push(i);
-      while (!s.empty()) {
-	int top = s.top();
-	cout << top << endl;
-	s.pop();
-	labels[top] = i;
-	for (set<int>::iterator it = adj_list[top].begin(); it != adj_list[top].end(); it++) {
-	  int n = *it;
-	  if (n < end-start) cout << "YAYYY" << endl;
-	  if (labels[n] != -1)  {
-	    s.push(n);
-	  }
-	}
-      }
-    }
-    else {
-      cout << "YAY" << endl;
-    }
-    }*/
-  /*map<int, vector<int> > CCs;
-  for (int i = 0; i < end-start; i++) {
-    CCs[labels[i]].push_back(i + start);
-    }*/
-
   return CCs;
  }
-
 
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  ifstream in("ml-1m/ratings.dat");
+  //ifstream in("ml-10M100K/ratings.dat");
+ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
-
+  //int m1 = 0, m2 = 0;
+  set<int> valid_remapped_ids;
+  for (int i = 0; i <= N_MOVIES; i++) {
+    valid_remapped_ids.insert(i);
+  }
   while (getline(in, s)) {
     int pos = 0;
     int count = 0;
@@ -354,8 +323,22 @@ vector<DataPoint> get_movielens_data() {
       s.erase(0, pos + delimiter.length());
     }
     C += features[2];
+    valid_remapped_ids.erase((int)features[1]);
+    //m1=max(m1,(int)features[0]);
+    //m2=max(m2,(int)features[1]);
     datapoints.push_back(DataPoint(features[0], features[1], features[2]));
   }
+
+  //Renormalize movie data (param 1)
+  set<int>::iterator cur_id = valid_remapped_ids.begin();
+  for (int i = 0; i < datapoints.size(); i++) {
+    if (get<1>(datapoints[i]) >= N_MOVIES) {
+      get<1>(datapoints[i]) = *cur_id;
+      cur_id++;
+    }
+  }
+
+  //cout << m1 << " " << m2 << endl;
   C /= (double)datapoints.size();
   return datapoints;
 }
@@ -365,14 +348,13 @@ void cyclades_movielens_completion() {
   //Read data nonzero data points
   vector<DataPoint> points = get_movielens_data();
   random_shuffle(points.begin(), points.end());
-
   Timer overall;  
 
   //Access pattern generation
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
 
   //Access pattern of form [thread][batch][point_ids]
-  vector<vector<DataPoint *> > access_pattern(NTHREAD);
+  vector<vector<int *> > access_pattern(NTHREAD);
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
 
@@ -391,17 +373,15 @@ void cyclades_movielens_completion() {
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
 
-    //ts.push_back(thread(threaded_distribute_ccs, ref(points), start, end, ref(access_pattern), ref(access_length), i));
-    //threaded_distribute_ccs(points, start, end, access_pattern, access_length, i);
     ///Compute connected components of data points
-    //Timer ttt;
+    Timer ttt;
     map<int, vector<int> > cc = compute_CC(points, start, end);
-    //cc_time += ttt.elapsed();
+    cc_time += ttt.elapsed();
 
     //Distribute connected components across threads
-    //Timer ttt2;
+    Timer ttt2;
     distribute_ccs(cc, access_pattern, access_length, i, points);
-    //alloc_time += ttt2.elapsed();
+    alloc_time += ttt2.elapsed();
   }
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
@@ -430,7 +410,7 @@ void cyclades_movielens_completion() {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       numa_run_on_node(j % N_NUMA_NODES);
-      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), j, i % 2));
+      threads.push_back(thread(do_cyclades_gradient_descent, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
     }
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
@@ -439,15 +419,15 @@ void cyclades_movielens_completion() {
       thread_batch_on[j] = 0;
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
   //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;;
   //cout << overall.elapsed() << endl;
-  //cout << gradient_time.elapsed() << endl;
-  //cout << compute_loss(points) << endl;
+  cout << gradient_time.elapsed() << endl;
+  cout << compute_loss(points) << endl;
 }
 
 void hogwild_completion() {
@@ -507,15 +487,15 @@ void hogwild_completion() {
       threads[j].join();
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
+    //cout << i << " " << compute_loss(points) << " " << overall.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << " " << gradient_time.elapsed() << endl;
   }
   //cout << overall.elapsed() << endl;
   //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;
-  //cout << gradient_time.elapsed() << endl;
-  //cout << compute_loss(points) << endl;
+  cout << gradient_time.elapsed() << endl;
+  cout << compute_loss(points) << endl;
 }
 
 int main(void) {

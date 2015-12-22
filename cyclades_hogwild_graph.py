@@ -106,8 +106,8 @@ def plotloss_across_epochs(epoch_range, n_rep):
     cyc_times = [x / float(n_rep) for x in cyc_times]
     hog_times = [x / float(n_rep) for x in hog_times]
     
-    plt.plot(cyc_times[100:], cyc_losses[100:], color='r', label="cyc_loss_avgs")
-    plt.plot(hog_times[100:], hog_losses[100:], color='b', label="hog_loss_avgs")
+    plt.plot(cyc_times[:], cyc_losses[:], color='r', label="cyc_loss_avgs")
+    plt.plot(hog_times[:], hog_losses[:], color='b', label="hog_loss_avgs")
     #plt.plot(epochs, cyc_times, color='r', label="cyc")
     #plt.plot(epochs, hog_times, color='b', label="hog")
 
@@ -131,6 +131,24 @@ def plotspeedups(epochs, thread_range):
     plt.plot(*zip(*hog_times), color="b", label="hog_times")
     plt.legend(loc="upper left")
     plt.savefig("figure.png")
+
+def plot_rank(ranks, epochs):
+    hog_data, cyc_data = [], []
+    for i, rank in enumerate(ranks):
+        hog_data.append([])
+        cyc_data.append([])
+        for epoch in epochs:
+            cyc_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_cyc", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
+            hog_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_hog", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
+            cyc_time = float(cyc_time_loss_pairs[0])
+            hog_time = float(hog_time_loss_pairs[0])
+            hog_data[i].append((epoch, hog_time))
+            cyc_data[i].append((epoch, cyc_time))
+    for i, rank in enumerate(ranks):
+        plt.plot(*zip(*hog_data[i]), label="hog_times_rank" + str(rank))
+        plt.plot(*zip(*cyc_data[i]), label="cyc_times_rank" + str(rank))
+    plt.legend(loc="upper left")
+    plt.savefig("figure.png")
         
 
 #run_cyclades("cyc_model_dup", 10, 10, 1);
@@ -140,7 +158,9 @@ def plotspeedups(epochs, thread_range):
 
 #plotdata(10, [1, 5, 10, 20, 50, 100])
 
-plotloss_across_epochs(200, 1)
+#plotloss_across_epochs(150, 1)
 
 #plotdata_across_epochs(2, [5, 10, 50, 100, 150])
 #plotspeedups(50, list(range(1, 32)));
+
+plot_rank([500], [5, 10, 50, 100, 150])
