@@ -1,9 +1,15 @@
-N_EPOCHS=10
-GRAD_COST=1
-EPOCH_LIMIT=0
-TIME_LIMIT=100
+GRAD_COST=1 # For dataaccess only
+EPOCH_LIMIT=0 # Not really used right now
+TIME_LIMIT=100 # Not reall used right now
+
+N_EPOCHS=150
+BATCH_SIZE=200
 NTHREAD=8
-RANK=10
+RLENGTH=10
+SHOULD_SYNC=0
+SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=0
+HOG=0
+CYC=1
 
 UNAME := $(shell uname)
 
@@ -35,6 +41,20 @@ CPP_LAST =
 
 endif
 
+cyc_movielens_hog_compile:
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_hog \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0
+cyc_movielens_hog_run:
+	@numactl --interleave=0,1 ./movielens_hog
+
+cyc_movielens_cyc_compile:
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_cyc \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1
+cyc_movielens_cyc_run:
+	@numactl --interleave=0,1 ./movielens_cyc
+
 cyc_movielens_completion_hog:
 	rm -rf movielens_completion_hog
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -o movielens_completion_hog
@@ -43,16 +63,6 @@ cyc_movielens_completion_cyc:
 	rm -rf movielens_completion_cyc
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -o movielens_completion_cyc
 	numactl --interleave=0,1 ./movielens_completion_cyc
-cyc_movielens_hog_comp:
-	@rm -rf movielens_completion_hog
-	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -DN_EPOCHS=$(N_EPOCHS) -DTIME_LIMIT=$(TIME_LIMIT) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RANK) -o movielens_completion_hog
-cyc_movielens_cyc_comp:
-	@rm -rf movielens_completion_cyc
-	@g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -DN_EPOCHS=$(N_EPOCHS) -DTIME_LIMIT=$(TIME_LIMIT) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RANK) -o movielens_completion_cyc
-cyc_movielens_hog_run:
-	@numactl --interleave=0,1 ./movielens_completion_hog
-cyc_movielens_cyc_run:
-	@numactl --interleave=0,1 ./movielens_completion_cyc
 
 cyc_movielens_sgd:
 	rm  -rf movielens_cyc

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from subprocess import Popen, PIPE
 
-N_REP = 3
+N_REP = 5
 
 def run_cyclades(command, n_rep, n_epochs, grad_cost):
     # Compile first
@@ -46,6 +46,7 @@ def run_cyclades_params(command, n_rep, args):
 def run_cyclades_params_and_get_output(command, args):
     # Compile first
     Popen(["make", command+"_comp"] + args, stdout=PIPE).communicate()[0]
+    print(["make", command+"_run"] + args)
     return Popen(["make", command+"_run"] + args, stdout=PIPE).communicate()[0].strip().split()
 
 def plotdata_across_grad_cost(n_epoch, grad_cost_range):
@@ -132,16 +133,22 @@ def plotspeedups(epochs, thread_range):
     plt.legend(loc="upper left")
     plt.savefig("figure.png")
 
-def plot_rank(ranks, epochs):
+def plot_rank(ranks, epochs, reps):
     hog_data, cyc_data = [], []
     for i, rank in enumerate(ranks):
         hog_data.append([])
         cyc_data.append([])
         for epoch in epochs:
-            cyc_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_cyc", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
-            hog_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_hog", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
-            cyc_time = float(cyc_time_loss_pairs[0])
-            hog_time = float(hog_time_loss_pairs[0])
+            avg_cyc_time, avg_hog_time = 0, 0
+            for rep in range(reps):
+                cyc_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_cyc", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
+                hog_time_loss_pairs = run_cyclades_params_and_get_output("cyc_movielens_hog", ["N_EPOCHS="+str(epoch), "RANK="+str(rank)])
+                cyc_time = float(cyc_time_loss_pairs[0])
+                hog_time = float(hog_time_loss_pairs[0])
+                avg_cyc_time += cyc_time
+                avg_hog_time += hog_time
+            avg_cyc_time /= float(reps)
+            avg_hog_time /= float(reps)
             hog_data[i].append((epoch, hog_time))
             cyc_data[i].append((epoch, cyc_time))
     for i, rank in enumerate(ranks):
@@ -149,7 +156,31 @@ def plot_rank(ranks, epochs):
         plt.plot(*zip(*cyc_data[i]), label="cyc_times_rank" + str(rank))
     plt.legend(loc="upper left")
     plt.savefig("figure.png")
-        
+
+def plot_ratio_times(ranks, threads, epochs, n_rep):
+    ratio_times = []
+    for j, rank in enumerate(ranks):
+        ratio_times.append([])
+        for i, thread in enumerate(threads):
+            ratio_times[j].append([])
+            for epoch in epochs:
+                avg_ratio = 0
+                for k in range(n_rep):
+                    print("Thread: %d Epoch %d k %d" % (thread, epoch, k))
+                    cyc_out = run_cyclades_params_and_get_output("cyc_movielens_cyc", ["N_EPOCHS="+str(epoch), "NTHREAD="+str(thread), "RANK="+str(rank)])
+                    hog_out = run_cyclades_params_and_get_output("cyc_movielens_hog", ["N_EPOCHS="+str(epoch), "NTHREAD="+str(thread), "RANK="+str(rank)])
+                    print(cyc_out, hog_out)
+                    t_cyc = float(cyc_out[0])
+                    t_hog = float(hog_out[0])
+                    ratio = 1 / (float(t_cyc) / float(t_hog))
+                    avg_ratio += ratio
+                avg_ratio /= float(n_rep)
+                ratio_times[j][i].append((epoch, avg_ratio))
+    for j, rank in enumerate(ranks):
+        for i, thread in enumerate(threads):
+            plt.plot(*zip(*ratio_times[j][i]), label="hog/cyc ratio avg over " + str(n_rep) + " " + str(thread) + " threads rank" + str(rank))
+    plt.legend(loc="upper left")
+    plt.savefig("figure.png")
 
 #run_cyclades("cyc_model_dup", 10, 10, 1);
 #run_cyclades("cyc", 10, 10, 1);
@@ -163,4 +194,7 @@ def plot_rank(ranks, epochs):
 #plotdata_across_epochs(2, [5, 10, 50, 100, 150])
 #plotspeedups(50, list(range(1, 32)));
 
-plot_rank([500], [5, 10, 50, 100, 150])
+#plot_rank([10], [5, 10, 50, 100, 150, 300, 500], N_REP)
+
+plot_ratio_times([10, 100], [2, 4, 8], [5, 10, 50, 100, 150, 300, 500], 2)
+#plot_ratio_times([10, 100], [2, 8], [5, 10], 5)
