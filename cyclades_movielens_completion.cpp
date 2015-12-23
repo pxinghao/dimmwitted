@@ -23,14 +23,14 @@
 #define HOG 0
 #endif
 
-//#define N_USERS 6041 //1M dataset
-//#define N_MOVIES 3091 //1M dataset
-#define N_USERS 71568
-#define N_MOVIES 10682
+#define N_USERS 6041 //1M dataset
+#define N_MOVIES 3091 //1M dataset
+//#define N_USERS 71568
+//#define N_MOVIES 10682
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 150
+#define N_EPOCHS 500
 #endif
 
 #ifndef BATCH_SIZE
@@ -42,7 +42,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 10
+#define RLENGTH 300
 #endif
 
 #ifndef SHOULD_SYNC
@@ -173,7 +173,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	    break;
 	  }
 	}
-      }
+	}
     }
     
     //For every data point in the connected component
@@ -348,6 +348,7 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   int tree[end-start + N_MOVIES + N_USERS];
   for (int i = 0; i < end-start + N_MOVIES + N_USERS; i++) 
     tree[i] = i;
+
   for (int i = start; i < end; i++) {
     DataPoint p = points[i];
     int src = i-start;
@@ -359,20 +360,19 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
     tree[c3] = c1;
     tree[c2] = c1;
   }
-
   map<int, vector<int> > CCs;
   for (int i = 0; i < end-start; i++) {
-    CCs[union_find(i, tree)].push_back(i + start);
+    int group = union_find(i, tree);
+    CCs[group].push_back(i+start);    
   }
-
   return CCs;
  }
 
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  ifstream in("ml-10M100K/ratings.dat");
-  //ifstream in("ml-1m/ratings.dat");
+  //ifstream in("ml-10M100K/ratings.dat");
+  ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
@@ -443,10 +443,8 @@ void cyclades_movielens_completion() {
 
     ///Compute connected components of data points
     Timer ttt;
-    cout << "A" << endl;
     map<int, vector<int> > cc = compute_CC(points, start, end);
     cc_time += ttt.elapsed();
-    cout << "B" << endl;
     //Distribute connected components across threads
     Timer ttt2;
     distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);

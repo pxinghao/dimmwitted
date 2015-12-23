@@ -82,7 +82,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
             for r in rank_range:
                 for s in sync_range:
                     plt.figure()
-                    param_desc = "batch=%d_thread=%d_rank=%d_sync=%d_avg_over=%d" % (b, t, r, s, average_over_n_rep)
+                    param_desc = "batch=%d_thread=%d_rank=%d_avg_over=%d" % (b, t, r, average_over_n_rep)
                     title = "Overall_Time_Epoch_Comparison_" + param_desc
                     plt.title(title, fontsize=12)
                     plt.xlabel("Epoch")
@@ -93,10 +93,11 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                         times = get_values(average_total_times, [c], epoch_range, [b], [t], [r], [s])
                         epochs = epoch_range
                         print(epochs, times)
-                        plt.plot(epochs, times, label=c)
+                        plt.plot(epochs, times, label=c + " sync="+ str(s))
 
                     plt.legend(loc="upper left")
                     plt.savefig(title + ".png")
+                    plt.clf()
 
     # Create gradient time epoch plot
     for b in batch_size_range:
@@ -104,7 +105,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
             for r in rank_range:
                 for s in sync_range:
                     plt.figure()
-                    param_desc = "batch=%d_thread=%d_rank=%d_sync=%d_avg_over=%d" % (b, t, r, s, average_over_n_rep)
+                    param_desc = "batch=%d_thread=%d_rank=%d_avg_over=%d" % (b, t, r, average_over_n_rep)
                     title = "Gradient_Time_Epoch_Comparison_" + param_desc
                     plt.title(title, fontsize=12)
                     plt.xlabel("Epoch")
@@ -115,12 +116,13 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                         times = get_values(average_gradient_times, [c], epoch_range, [b], [t], [r], [s])
                         epochs = epoch_range
                         print(epochs, times)
-                        plt.plot(epochs, times, label=c)
+                        plt.plot(epochs, times, label=c + " sync=" + str(s))
 
                     plt.legend(loc="upper left")
                     plt.savefig(title + ".png")
+                    plt.clf()
 
 
-draw_all_graphs(0, [10, 50, 150], [200], [8], [500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 5)
+draw_all_graphs(1, [10, 50, 200], [100, 200, 250], [16, 8, 4], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
 #draw_all_graphs(0, [10, 50, 150], [500], [8], [10, 100], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
     
