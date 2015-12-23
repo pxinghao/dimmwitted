@@ -23,8 +23,10 @@
 #define HOG 0
 #endif
 
-#define N_USERS 6041
-#define N_MOVIES 3091
+//#define N_USERS 6041 //1M dataset
+//#define N_MOVIES 3091 //1M dataset
+#define N_USERS 71568
+#define N_MOVIES 10682
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
@@ -75,6 +77,9 @@ double u_model[N_MOVIES][RLENGTH];
 
 double thread_load_balance[NTHREAD];
 double load_balance_avg_max = 0;
+
+size_t cur_bytes_allocated[NTHREAD];
+int cur_datapoints_used[NTHREAD];
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
@@ -143,7 +148,7 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
   }
 }
 
-void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_pattern, vector<int> &access_length, int thread_id, int epoch_parity) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
   //Keep track of local model
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -174,7 +179,8 @@ void do_cyclades_gradient_descent_with_points(vector<DataPoint *> &access_patter
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
-      DataPoint p = access_pattern[batch][i];
+      DataPoint p = access_pattern[batch_index_start[batch]+i];
+      //DataPoint p = access_pattern[i];
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);            
       double gradient = 0;
@@ -226,7 +232,7 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
   }
 }
 
-void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &access_pattern, vector<vector<int> > &access_length, int batchnum, vector<DataPoint> &points) {
+void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points) {
   int chosen_threads[ccs.size()];
   int total_size_needed[NTHREAD];
   int count = 0;
@@ -265,15 +271,40 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &a
     //access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
     //access_pattern[i][batchnum] = new int[total_size_needed[i]];
     //access_pattern[i][batchnum] = new int[total_size_needed[i]];
-    access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
+    //access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
     //access_pattern[i][batchnum] = (DataPoint *)malloc(total_size_needed[i] * sizeof(DataPoint));
     //access_pattern[i][batchnum] = new DataPoint[total_size_needed[i]];
     //access_pattern[i][batchnum] = vector<DataPoint>(total_size_needed[i]);
     //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
-    if (access_pattern[i][batchnum] == NULL) {
-      cout << "OUT OF MEMORY" << endl;
+
+    batch_index_start[i][batchnum] = cur_datapoints_used[i];
+    if (cur_bytes_allocated[i] == 0) {
+      size_t new_size = (size_t)total_size_needed[i] * sizeof(DataPoint);
+      new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
+      access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
+      cur_bytes_allocated[i] = new_size;
+    }
+    else {
+      if ((cur_datapoints_used[i] + total_size_needed[i])*sizeof(DataPoint) >=
+	  cur_bytes_allocated[i]) {
+	size_t old_size = (size_t)(cur_bytes_allocated[i]);
+	size_t new_size = (size_t)((cur_datapoints_used[i] + total_size_needed[i]) * sizeof(DataPoint));
+	//Round new size to next page length 
+	new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
+	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
+	cur_bytes_allocated[i] = new_size;
+      }
+    }
+    cur_datapoints_used[i] += total_size_needed[i];
+    if (access_pattern[i] == NULL) {
+      cout << "OOM" << endl;
       exit(0);
     }
+      
+    /*if (access_pattern[i][batchnum] == NULL) {
+      cout << "OUT OF MEMORY" << endl;
+      exit(0);
+      }*/
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
     //cout << "THREAD " << i << " NUM DATAPOINTS: " << total_size_needed[i] << endl;
@@ -287,9 +318,10 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &a
     vector<int> cc = it->second;
     int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
+      access_pattern[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = points[cc[i]];
       //cout << chosen_thread << " " << batchnum << " " << index_count[chosen_thread] << " "  << endl;
       //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
-      access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
+      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
       //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = DataPoint(1,2,3);
       //cout << access_pattern[chosen_thread][batchnum] << endl;
       //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
@@ -339,8 +371,8 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  //ifstream in("ml-10M100K/ratings.dat");
-  ifstream in("ml-1m/ratings.dat");
+  ifstream in("ml-10M100K/ratings.dat");
+  //ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
@@ -388,13 +420,15 @@ void cyclades_movielens_completion() {
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
 
   //Access pattern of form [thread][batch][point_ids]
-  vector<vector<DataPoint *> > access_pattern(NTHREAD);
+  vector<DataPoint *> access_pattern(NTHREAD);
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
+  vector<vector<int > > batch_index_start(NTHREAD);
 
   for (int i = 0; i < NTHREAD; i++) {
-    access_pattern[i].resize(n_batches);
+    //access_pattern[i].resize(n_batches);
     access_length[i].resize(n_batches);
+    batch_index_start[i].resize(n_batches);
   }
 
   //CC Generation
@@ -409,13 +443,13 @@ void cyclades_movielens_completion() {
 
     ///Compute connected components of data points
     Timer ttt;
-
+    cout << "A" << endl;
     map<int, vector<int> > cc = compute_CC(points, start, end);
     cc_time += ttt.elapsed();
-
+    cout << "B" << endl;
     //Distribute connected components across threads
     Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, i, points);
+    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);
     alloc_time += ttt2.elapsed();
   }
 
@@ -446,7 +480,7 @@ void cyclades_movielens_completion() {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
       numa_run_on_node(j % N_NUMA_NODES);
-      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), j, i%2));
+      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
     }
     for (int j = 0; j < threads.size(); j++) {
       threads[j].join();
@@ -540,6 +574,11 @@ void hogwild_completion() {
 }
 
 int main(void) {
+  for (int i = 0; i < NTHREAD; i++) {
+    cur_bytes_allocated[i] = 0;
+    cur_datapoints_used[i] = 0;
+  }
+
   srand(0);
   for (int i = 0; i < RLENGTH; i++) {
     for (int j = 0; j < N_USERS; j++) {
