@@ -121,5 +121,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                     plt.savefig(title + ".png")
 
 
-draw_all_graphs(1, [10, 50, 150, 200], [200], [8], [10, 100], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 5)
+draw_all_graphs(0, [10, 50, 150], [200], [8], [10, 100], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
+#draw_all_graphs(0, [10, 50, 150], [500], [8], [10, 100], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
     

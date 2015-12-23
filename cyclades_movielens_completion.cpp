@@ -30,14 +30,17 @@
 #ifndef N_EPOCHS
 #define N_EPOCHS 150
 #endif
+
+#ifndef BATCH_SIZE
 #define BATCH_SIZE 200
+#endif
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 500
+#define RLENGTH 10
 #endif
 
 #ifndef SHOULD_SYNC
@@ -69,6 +72,9 @@ int volatile thread_batch_on[NTHREAD];
 //double ** v_model, **rmodel;
 double v_model[N_USERS][RLENGTH];
 double u_model[N_MOVIES][RLENGTH];
+
+double thread_load_balance[NTHREAD];
+double load_balance_avg_max = 0;
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
@@ -251,15 +257,17 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &a
   
   //Allocate memory
   int index_count[NTHREAD];
+  int max_load = 0;
   for (int i = 0; i < NTHREAD; i++) {
     int numa_node = i % N_NUMA_NODES;
-    numa_run_on_node(numa_node);
-    numa_set_localalloc();
+    //numa_run_on_node(numa_node);
+    //numa_set_localalloc();
     //access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
     //access_pattern[i][batchnum] = new int[total_size_needed[i]];
     //access_pattern[i][batchnum] = new int[total_size_needed[i]];
-    //access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
-    access_pattern[i][batchnum] = new DataPoint[total_size_needed[i]];
+    access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
+    //access_pattern[i][batchnum] = (DataPoint *)malloc(total_size_needed[i] * sizeof(DataPoint));
+    //access_pattern[i][batchnum] = new DataPoint[total_size_needed[i]];
     //access_pattern[i][batchnum] = vector<DataPoint>(total_size_needed[i]);
     //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
     if (access_pattern[i][batchnum] == NULL) {
@@ -268,7 +276,11 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint *> > &a
     }
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
+    //cout << "THREAD " << i << " NUM DATAPOINTS: " << total_size_needed[i] << endl;
+    thread_load_balance[i] += total_size_needed[i];
+    max_load = max(max_load, (int)total_size_needed[i]);
   }
+  load_balance_avg_max += max_load;
   //Copy memory over
   count = 0;  
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
@@ -452,6 +464,11 @@ void cyclades_movielens_completion() {
   cout << overall.elapsed() << endl;
   cout << gradient_time.elapsed() << endl;
   cout << compute_loss(points) << endl;
+  
+  /*for (int i = 0; i < NTHREAD; i++) {
+    cout << thread_load_balance[i] / (double)n_batches << endl;
+  }
+  cout << load_balance_avg_max / (double)n_batches << endl;*/
 }
 
 void hogwild_completion() {
