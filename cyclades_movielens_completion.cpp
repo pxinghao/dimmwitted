@@ -30,7 +30,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 500
+#define N_EPOCHS 200
 #endif
 
 #ifndef BATCH_SIZE
@@ -42,7 +42,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 300
+#define RLENGTH 100
 #endif
 
 #ifndef SHOULD_SYNC
@@ -80,6 +80,14 @@ double load_balance_avg_max = 0;
 
 size_t cur_bytes_allocated[NTHREAD];
 int cur_datapoints_used[NTHREAD];
+int core_to_node[NTHREAD];
+
+void pin_to_core(size_t core) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(core, &cpuset);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+}
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
@@ -149,6 +157,7 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
 }
 
 void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
+  pin_to_core(thread_id);
   //Keep track of local model
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -477,7 +486,8 @@ void cyclades_movielens_completion() {
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     for (int j = 0; j < NTHREAD; j++) {
-      numa_run_on_node(j % N_NUMA_NODES);
+      //numa_run_on_node((j+1) % N_NUMA_NODES);
+      numa_run_on_node(core_to_node[j]);
       threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
     }
     for (int j = 0; j < threads.size(); j++) {
@@ -572,6 +582,19 @@ void hogwild_completion() {
 }
 
 int main(void) {
+  //Create a map from core/thread -> node
+  for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
+  int num_cpus = numa_num_task_cpus();
+  struct bitmask *bm = numa_bitmask_alloc(num_cpus);
+  for (int i=0; i<=numa_max_node(); ++i) {
+      numa_node_to_cpus(i, bm);
+      for (int j = 0; j < min((int)bm->size, NTHREAD); j++) {
+	if (numa_bitmask_isbitset(bm, j)) {
+	  core_to_node[j] = i;
+	}
+      }
+    }
+
   for (int i = 0; i < NTHREAD; i++) {
     cur_bytes_allocated[i] = 0;
     cur_datapoints_used[i] = 0;

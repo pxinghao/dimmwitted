@@ -1,5 +1,6 @@
 import sys
 import pickle
+import math
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -75,7 +76,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
         pickle.dump([average_losses, average_gradient_times, average_total_times], f)
 
 
-    # Reminder: arrays of form [command][epoch][batch_size][thread][rank][sync]
+    """# Reminder: arrays of form [command][epoch][batch_size][thread][rank][sync]
     # Create overall time epoch plot
     for b in batch_size_range:
         for t in thread_range:
@@ -120,9 +121,65 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
                     plt.legend(loc="upper left")
                     plt.savefig(title + ".png")
-                    plt.clf()
+                    plt.clf()"""
+
+    for r in rank_range:
+        for b in batch_size_range:
+            f, plots = plt.subplots(1, len(thread_range), sharex=True, sharey=True)
+            title = "Epoch_Gradient_Plot_Batch=%d_Rank=%d" % (b, r)
+            f.suptitle(title, fontsize=12) 
+            for index, t in enumerate(thread_range):
+                plots[index].set_title("%d threads" % t)
+                for s in sync_range:
+                    for c in commands:
+                        plots[index].set_xlabel("Epoch")
+                        plots[index].set_ylabel("Gradient Time")
+                        times = get_values(average_gradient_times, [c], epoch_range, [b], [t], [r], [s])
+                        epochs = epoch_range
+                        low = min(times)
+                        high = max(times)
+                        if 'hog' in c:
+                            if s == 0:
+                                plots[index].plot(epochs, times, label=c)
+                        else:
+                            plots[index].plot(epochs, times, label=c+" sync="+str(s))
+                        #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
+                plots[index].legend(loc="upper left", fontsize=8)
+            #f.subplots_adjust(hspace=0)
+            f.tight_layout()
+            f.subplots_adjust(top=.85)
+            f.savefig(title+".png")
+            f.clf()
+
+    for r in rank_range:
+        for b in batch_size_range:
+            f, plots = plt.subplots(1, len(thread_range), sharex=True, sharey=True)
+            title = "Thread_Time_Plot_Batch=%d_Rank=%d" % (b, r)
+            f.suptitle(title, fontsize=12) 
+            for index, e in enumerate(epoch_range):
+                plots[index].set_title("%d epoch" % e)
+                for s in sync_range:
+                    for c in commands:
+                        plots[index].set_xlabel("Thread")
+                        plots[index].set_ylabel("Gradient Time")
+                        times = get_values(average_gradient_times, [c], [e], [b], thread_range, [r], [s])
+                        threads = thread_range
+                        low = min(times)
+                        high = max(times)
+                        if 'hog' in c:
+                            if s == 0:
+                                plots[index].plot(threads, times, label=c)
+                        else:
+                            plots[index].plot(threads, times, label=c+" sync="+str(s))
+                        #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
+                plots[index].legend(loc="upper left", fontsize=8)
+            #f.subplots_adjust(hspace=0)
+            f.tight_layout()
+            f.subplots_adjust(top=.85)
+            f.savefig(title+".png")
+            f.clf()                        
 
 
-draw_all_graphs(1, [10, 50, 200], [100, 200, 250], [16, 8, 4], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
+draw_all_graphs(0, [10, 50, 150, 200], [200], [16, 8, 4, 2], [10, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_all_graphs(0, [10, 50, 150], [500], [8], [10, 100], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
     
