@@ -36,21 +36,21 @@ using namespace std;
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 4
+#define NTHREAD 32
 #endif
 #ifndef N_NUMA_NODES
 #define N_NUMA_NODES 2
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 20
 #endif
 
 #define MODEL_SIZE 1000000
 #define DATA_FILE "data/dataaccess_data_multinomialLogisticRegression.txt"
 #define DATA_ACCESS_FILE "data/dataaccess_nthreads4_multinomialLogisticRegression.txt"
 
-double volatile models[MODEL_SIZE];
+double models[MODEL_SIZE];
 int volatile thread_batch_on[NTHREAD];
 int volatile representative_thread_on[N_NUMA_NODES]; 
 int * model_part[N_NUMA_NODES];

@@ -30,7 +30,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 200
+#define N_EPOCHS 20
 #endif
 
 #ifndef BATCH_SIZE
@@ -38,15 +38,15 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 2
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 100
+#define RLENGTH 30
 #endif
 
 #ifndef SHOULD_SYNC
-#define SHOULD_SYNC 1
+#define SHOULD_SYNC 0
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
@@ -485,16 +485,21 @@ void cyclades_movielens_completion() {
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
-    for (int j = 0; j < NTHREAD; j++) {
-      //numa_run_on_node((j+1) % N_NUMA_NODES);
-      numa_run_on_node(core_to_node[j]);
-      threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
+    if (NTHREAD == 1) {
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
     }
-    for (int j = 0; j < threads.size(); j++) {
-      threads[j].join();
-    }
-    for (int j = 0; j < NTHREAD; j++) {
-      thread_batch_on[j] = 0;
+    else {
+      for (int j = 0; j < NTHREAD; j++) {
+	//numa_run_on_node((j+1) % N_NUMA_NODES);
+	numa_run_on_node(core_to_node[j]);
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
+      }
+      for (int j = 0; j < threads.size(); j++) {
+	threads[j].join();
+      }
+      for (int j = 0; j < NTHREAD; j++) {
+	thread_batch_on[j] = 0;
+      }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH)
@@ -503,9 +508,11 @@ void cyclades_movielens_completion() {
   //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;;
-  cout << overall.elapsed() << endl;
-  cout << gradient_time.elapsed() << endl;
-  cout << compute_loss(points) << endl;
+  if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    cout << overall.elapsed() << endl;
+    cout << gradient_time.elapsed() << endl;
+    cout << compute_loss(points) << endl;
+  }
   
   /*for (int i = 0; i < NTHREAD; i++) {
     cout << thread_load_balance[i] / (double)n_batches << endl;
@@ -563,11 +570,16 @@ void hogwild_completion() {
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
-    for (int j = 0; j < NTHREAD; j++) {
-      threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
+    if (NTHREAD == 1) {
+      do_cyclades_gradient_descent_no_sync(access_pattern[0], access_length[0], points, 0);
     }
-    for (int j = 0; j < threads.size(); j++) {
-      threads[j].join();
+    else {
+      for (int j = 0; j < NTHREAD; j++) {
+	threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
+      }
+      for (int j = 0; j < threads.size(); j++) {
+	threads[j].join();
+      }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH)
@@ -576,9 +588,11 @@ void hogwild_completion() {
   //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
   //cout << "LOSS: " << compute_loss(points) << endl;
-  cout << overall.elapsed() << endl;
-  cout << gradient_time.elapsed() << endl;
-  cout << compute_loss(points) << endl;
+  if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    cout << overall.elapsed() << endl;
+    cout << gradient_time.elapsed() << endl;
+    cout << compute_loss(points) << endl;
+  }
 }
 
 int main(void) {
