@@ -30,7 +30,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 200
 #endif
 
 #ifndef BATCH_SIZE
@@ -38,15 +38,15 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 2
+#define NTHREAD 8
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 30
+#define RLENGTH 200
 #endif
 
 #ifndef SHOULD_SYNC
-#define SHOULD_SYNC 0
+#define SHOULD_SYNC 1
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
@@ -158,6 +158,7 @@ void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &ac
 
 void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
   pin_to_core(thread_id);
+  //numa_run_on_node(core_to_node[thread_id]);
   //Keep track of local model
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -274,7 +275,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
   int index_count[NTHREAD];
   int max_load = 0;
   for (int i = 0; i < NTHREAD; i++) {
-    int numa_node = i % N_NUMA_NODES;
+    //int numa_node = i % 2;
+    int numa_node = core_to_node[i];
     //numa_run_on_node(numa_node);
     //numa_set_localalloc();
     //access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
@@ -386,7 +388,7 @@ vector<DataPoint> get_movielens_data() {
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
   set<int> valid_remapped_ids;
-  for (int i = 0; i <= N_MOVIES; i++) {
+  for (int i = 0; i < N_MOVIES; i++) {
     valid_remapped_ids.insert(i);
   }
   while (getline(in, s)) {
@@ -491,7 +493,7 @@ void cyclades_movielens_completion() {
     else {
       for (int j = 0; j < NTHREAD; j++) {
 	//numa_run_on_node((j+1) % N_NUMA_NODES);
-	numa_run_on_node(core_to_node[j]);
+	//numa_run_on_node(core_to_node[j]);
 	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
       }
       for (int j = 0; j < threads.size(); j++) {
