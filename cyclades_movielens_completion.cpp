@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <boost/graph/connected_components.hpp>
 #include <boost/graph/adjacency_list.hpp>
+#include <numa.h>
+#include <sched.h>
 
 #ifndef TIME_LIMIT
 #define TIME_LIMIT 10000000
