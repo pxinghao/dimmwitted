@@ -417,6 +417,7 @@ vector<DataPoint> get_movielens_data() {
       }
       else {
 	get<1>(datapoints[i]) = *cur_id;
+	mappings[datapoints[i]] = get<1>(datapoints[i]);
 	cur_id++;
       }
     }
