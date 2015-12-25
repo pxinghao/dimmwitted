@@ -407,11 +407,18 @@ vector<DataPoint> get_movielens_data() {
   }
 
   //Renormalize movie data (param 1)
+  //Renormalize movie data (param 1)
   set<int>::iterator cur_id = valid_remapped_ids.begin();
+  map<int, int> mappings;
   for (int i = 0; i < datapoints.size(); i++) {
     if (get<1>(datapoints[i]) >= N_MOVIES) {
-      get<1>(datapoints[i]) = *cur_id;
-      cur_id++;
+      if (mappings.find(get<1>(datapoints[i])) != mappings.end()) {
+	get<1>(datapoints[i]) = mappings[get<1>(datapoints[i])];
+      }
+      else {
+	get<1>(datapoints[i]) = *cur_id;
+	cur_id++;
+      }
     }
   }
 
