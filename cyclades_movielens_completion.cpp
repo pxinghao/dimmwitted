@@ -9,8 +9,7 @@
 #include <time.h>
 #include <map>
 #include <unistd.h>
-#include <boost/graph/connected_components.hpp>
-#include <boost/graph/adjacency_list.hpp>
+#include <set>
 #include <numa.h>
 #include <sched.h>
 
@@ -32,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 200
+#define N_EPOCHS 100
 #endif
 
 #ifndef BATCH_SIZE
