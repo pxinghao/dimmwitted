@@ -39,7 +39,7 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 16
 #endif
 
 #ifndef RLENGTH
@@ -218,6 +218,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 }
 
 void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
+  pin_to_core(thread_id);
+
   for (int batch = 0; batch < access_length.size(); batch++) {
 
     //For every data point in the connected component
