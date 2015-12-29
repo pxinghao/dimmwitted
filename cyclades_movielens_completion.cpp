@@ -24,18 +24,18 @@
 #define HOG 0
 #endif
 
-#define N_USERS 6041 //1M dataset
-#define N_MOVIES 3091 //1M dataset
-//#define N_USERS 71568
-//#define N_MOVIES 10682
+//#define N_USERS 6041 //1M dataset
+//#define N_MOVIES 3091 //1M dataset
+#define N_USERS 71568
+#define N_MOVIES 10682
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 50
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 200
+#define BATCH_SIZE 2000
 #endif
 
 #ifndef NTHREAD
@@ -43,7 +43,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 200
+#define RLENGTH 20
 #endif
 
 #ifndef SHOULD_SYNC
@@ -102,59 +102,6 @@ double compute_loss(vector<DataPoint> &p) {
     loss += diff * diff;
   }
   return sqrt(loss / (double)p.size());
-}
-
-void do_cyclades_gradient_descent(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
-  for (int batch = 0; batch < access_length.size(); batch++) {
-
-    //Update local model
-    /*for (int i = 0; i < RLENGTH; i++) {
-      for (int j = 0; j < max(N_USERS, N_MOVIES); j++) {
-	if (j < N_USERS) local_v_model[j][i] = v_model[j][i];
-	if (j < N_MOVIES) local_u_model[j][i] = u_model[j][i];
-      }
-      }*/
-
-    //Wait for all threads to be on the same batch
-    thread_batch_on[thread_id] = batch;    
-    int waiting_for_other_threads = 1;
-    while (waiting_for_other_threads) {
-      waiting_for_other_threads = 0;
-      for (int ii = 0; ii < NTHREAD; ii++) {
-	if (thread_batch_on[ii] < batch) {
-	  waiting_for_other_threads = 1;
-	  break;
-	}
-      }
-    }
-    
-    //For every data point in the connected component
-    for (int i = 0; i < access_length[batch]; i++) {
-      //Compute gradient
-      DataPoint p = points[access_pattern[batch][i]];
-      int x = get<0>(p), y = get<1>(p);
-      double r = get<2>(p);      
-      double gradient = 0;
-      
-      for (int j = 0; j < RLENGTH; j++) {
-	gradient += v_model[x][j] * u_model[y][j];
-	//gradient += local_v_model[x][j] * local_u_model[y][j];
-      }
-      gradient -= r + C;
-
-      //Perform updates
-      for (int j = 0; j < RLENGTH; j++) {
-	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
-	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
-	v_model[x][j] = new_v;
-	u_model[y][j] = new_u;
-	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
-	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
-	//local_v_model[x][j] = 24;
-	//local_u_model[y][j] = 50;
-      }
-    }
-  }
 }
 
 void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
@@ -217,20 +164,25 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
   }
 }
 
-void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<int> &access_length, vector<DataPoint> &points, int thread_id) {
+void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
   pin_to_core(thread_id);
+  //numa_run_on_node(core_to_node[thread_id]);
+  //Keep track of local model
 
   for (int batch = 0; batch < access_length.size(); batch++) {
 
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
-      DataPoint p = points[access_pattern[batch][i]];
+      DataPoint p = access_pattern[batch_index_start[batch]+i];
+      //DataPoint p = access_pattern[i];
       int x = get<0>(p), y = get<1>(p);
-      double r = get<2>(p);
+      double r = get<2>(p);            
       double gradient = 0;
+      
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
+	//gradient += local_v_model[x][j] * local_u_model[y][j];
       }
       gradient -= r + C;
 
@@ -240,6 +192,10 @@ void do_cyclades_gradient_descent_no_sync(vector<int *> &access_pattern, vector<
 	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
 	u_model[y][j] = new_u;
+	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
+	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
+	//local_v_model[x][j] = 24;
+	//local_u_model[y][j] = 50;
       }
     }
   }
@@ -385,8 +341,8 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  //ifstream in("ml-10M100K/ratings.dat");
-  ifstream in("ml-1m/ratings.dat");
+  ifstream in("ml-10M100K/ratings.dat");
+  //ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
@@ -542,54 +498,38 @@ void hogwild_completion() {
   Timer overall;
 
   //Hogwild access pattern construction
-  vector<vector<int *> > access_pattern(NTHREAD);
+  vector<DataPoint *> access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
+  vector<vector<int> > batch_index_start(NTHREAD);
 
   //Timer t2;
   int n_points_per_thread = points.size() / NTHREAD;
   for (int i = 0; i < NTHREAD; i++) {
     //No batches in hogwild, so treat it as all 1 batch
-    access_pattern[i].resize(1);
     access_length[i].resize(1);
+    batch_index_start[i].resize(1);
 
     int start = i * n_points_per_thread;
     int end = min(i * n_points_per_thread + n_points_per_thread, (int)points.size());
 
-    access_pattern[i][0] = (int *)malloc(sizeof(int) * n_points_per_thread);
+    batch_index_start[i][0] = 0;
+    access_pattern[i] = (DataPoint *)malloc(sizeof(DataPoint) * n_points_per_thread);
     for (int j = start; j < end; j++) {
-      access_pattern[i][0][j-start] = j;
+      access_pattern[i][j-start] = points[j];
     }
     access_length[i][0] = n_points_per_thread;
   }
-  //cout << "ALLOCATION TIME " << t2.elapsed() << endl;
-
-  /*int num_work = 0;
-  //for (int j = 0; j < n_batches; j++) {
-  for (int j = 0; j < 1; j++) {
-      cout << "BATCH " << j << endl;
-    for (int i = 0; i < NTHREAD; i++) {
-      cout << access_length[i][j] << " : ";
-      cout << "THREAD " << i << endl;
-      num_work += access_length[i][j];
-      for (int k = 0; k < min(10, access_length[i][j]); k++) {
-	cout << access_pattern[i][j][k] << " ";
-      }
-      cout << endl;
-    }
-  }
-  cout << "TOT WORK " << num_work << endl;
-  exit(0);*/
 
 //Divide to threads
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_no_sync(access_pattern[0], access_length[0], points, 0);
+      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(points), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
