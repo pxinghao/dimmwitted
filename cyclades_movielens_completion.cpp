@@ -31,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 10
 #endif
 
 #ifndef BATCH_SIZE
@@ -39,11 +39,11 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 8
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 20
+#define RLENGTH 200
 #endif
 
 #ifndef SHOULD_SYNC

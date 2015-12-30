@@ -46,23 +46,23 @@ cyc_movielens_hog_compile:
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \
 	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0
 cyc_movielens_hog_run:
-	@numactl --interleave=0,1 ./movielens_hog
+	@./movielens_hog
 
 cyc_movielens_cyc_compile:
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_cyc \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \
 	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1
 cyc_movielens_cyc_run:
-	@numactl --interleave=0,1 ./movielens_cyc
+	@./movielens_cyc
 
 cyc_movielens_completion_hog:
 	rm -rf movielens_completion_hog
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -o movielens_completion_hog
-	numactl --interleave=0,1 ./movielens_completion_hog
+	./movielens_completion_hog
 cyc_movielens_completion_cyc:
 	rm -rf movielens_completion_cyc
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -o movielens_completion_cyc
-	numactl --interleave=0,1 ./movielens_completion_cyc
+	./movielens_completion_cyc
 
 cyc_movielens_sgd:
 	rm  -rf movielens_cyc

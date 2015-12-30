@@ -196,7 +196,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             else:
                                 plots[index].plot(epochs, times, label=c+" sync="+str(s))
                         #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
-                    plots[index].legend(loc="upper left", fontsize=8)
+                    plots[index].legend(loc="upper left", fontsize=5)
             #f.subplots_adjust(hspace=0)
                 f.tight_layout()
                 f.subplots_adjust(top=.85)
@@ -224,7 +224,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             else:
                                 plots[index].plot(threads, times, label=c+" sync="+str(s))
                         #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
-                    plots[index].legend(loc="upper left", fontsize=8)
+                    plots[index].legend(loc="upper left", fontsize=5)
             #f.subplots_adjust(hspace=0)
                 f.tight_layout()
                 f.subplots_adjust(top=.85)
@@ -251,13 +251,13 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             time_values = get_values(average_total_times, [c], [e], [b], thread_range, [r], [s])
                             time_ratios = [float(base_time)/x for x in time_values]
                             plt.plot(thread_range, time_ratios)
-                            plt.legend(loc="upper left")
+                            plt.legend(loc="upper left", fontsize=5)
                             plt.savefig(title+".png")
                             plt.clf()
                             
 
 
 #draw_all_graphs(1, [10, 50, 150, 200], [200], [16, 8, 4, 2], [10, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
-draw_all_graphs(0, [10, 50, 150, 200], [200], [1, 8, 16, 32], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
+draw_all_graphs(1, [10, 50, 150, 200], [2000], [8, 16, 32], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_time_loss_graph(0, 50, [200], [8], [500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
     
