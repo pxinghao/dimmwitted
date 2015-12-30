@@ -254,6 +254,46 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             plt.legend(loc="upper left", fontsize=5)
                             plt.savefig(title+".png")
                             plt.clf()
+
+    hog_command = [x for x in commands if 'hog' in x][0]
+    for t in thread_range:
+        for r in rank_range:
+            for b in batch_size_range:
+                title = "Time_Ratios_Over_Hog_Per_Epoch_Batch=%d_Thread=%d_Rank=%d" % (b, t, r)
+                plt.figure()
+                plt.title(title, fontsize=12)
+                plt.ylabel("Hog Time / Cyclades Time")
+                plt.xlabel("Epoch")
+                for s in sync_range:
+                    for c in commands:
+                        if 'hog' not in c:
+                            baseline_hog_times = get_values(average_total_times, [hog_command], epoch_range, [b], [t], [r], [s])
+                            times = get_values(average_total_times, [c], epoch_range, [b], [t], [r], [s])
+                            ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
+                            plt.plot(epoch_range, ratio_times, label=c+"_sync="+str(s))
+                plt.legend(loc="upper left", fontsize=5)
+                plt.savefig(title+".png")
+                plt.clf()
+    for e in epoch_range:
+        for r in rank_range:
+            for b in batch_size_range:
+                title = "Time_Ratios_Over_Hog_Per_Thread_Batch=%d_Epoch=%d_Rank=%d" % (b, e, r)
+                plt.figure()
+                plt.title(title, fontsize=12)
+                plt.ylabel("Hog Time / Cyclades Time")
+                plt.xlabel("Thread")
+                for s in sync_range:
+                    for c in commands:
+                        if 'hog' not in c:
+                            baseline_hog_times = get_values(average_total_times, [hog_command], [e], [b], thread_range, [r], [s])
+                            times = get_values(average_total_times, [c], [e], [b], thread_range, [r], [s])
+                            ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
+                            plt.plot(thread_range, ratio_times, label=c+"_sync="+str(s))
+                plt.legend(loc="upper left", fontsize=5)
+                plt.savefig(title+".png")
+                plt.clf()
+                    
+            
                             
 
 
