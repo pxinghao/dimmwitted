@@ -63,6 +63,10 @@ cyc_movielens_completion_cyc:
 	rm -rf movielens_completion_cyc
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -o movielens_completion_cyc
 	./movielens_completion_cyc
+cyc_movielens_completion_cyc_mod_rep:
+	rm -rf movielens_completion_cyc_mod_rep
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DMOD_REP_CYC=1 -o movielens_completion_cyc_mod_rep
+	./movielens_completion_cyc_mod_rep
 
 cyc_movielens_sgd:
 	rm  -rf movielens_cyc

@@ -34,7 +34,6 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
     cur_iter = 0
     loss_values = tree()
     overall_time_values = tree()
-    gradient_time_values = tree()
     if not should_load_from_file:
         for b in batch_size_range:
             for t in thread_range:
@@ -45,19 +44,16 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                             cur_iter += 1
                             output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "RLENGTH="+str(r), "SHOULD_SYNC="+\
                                                                                     str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
-                            values = [float(x) for x in output[:-3]]
-                            epochs = [values[i] for i in range(0, len(values), 4)]
-                            losses = [values[i] for i in range(1, len(values), 4)]
-                            overall_times = [values[i] for i in range(2, len(values), 4)]
-                            grad_times = [values[i] for i in range(3, len(values), 4)]
+                            values = [float(x) for x in output]
+                            losses = [values[i] for i in range(0, len(values), 2)]
+                            overall_times = [values[i] for i in range(1, len(values), 2)]
                             loss_values[c][epoch_range][b][t][r][s] = losses
                             overall_time_values[c][epoch_range][b][t][r][s] = overall_times
-                            gradient_time_values[c][epoch_range][b][t][r][s] = grad_times
     else:
-        with open('objs.pickle') as f:
-            loss_values, overall_time_values, gradient_time_values = pickle.load(f)
-    with open('objs.pickle', "w") as f:
-        pickle.dump([loss_values, overall_time_values, gradient_time_values], f)
+        with open('objs2.pickle') as f:
+            loss_values, overall_time_values = pickle.load(f)
+    with open('objs2.pickle', "w") as f:
+        pickle.dump([loss_values, overall_time_values], f)
 
     for b in batch_size_range:
         for t in thread_range:
@@ -76,7 +72,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 plt.plot(times, losses, label=c)
                         else:
                             plt.plot(times, losses, label=c+" sync="+str(s))
-                plt.legend(loc="upper left")
+                plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
                                      
@@ -298,6 +294,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 
 #draw_all_graphs(1, [10, 50, 150, 200], [200], [16, 8, 4, 2], [10, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
-draw_all_graphs(1, [10, 50, 150, 200], [2000], [8, 16, 32], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
-#draw_time_loss_graph(0, 50, [200], [8], [500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
+#draw_all_graphs(1, [10, 50, 150, 200], [2000], [8, 16, 32], [10, 100, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
+draw_time_loss_graph(0, 50, [2000], [16], [500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
     
