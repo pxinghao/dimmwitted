@@ -24,10 +24,10 @@
 #define HOG 0
 #endif
 
-//#define N_USERS 6041 //1M dataset
-//#define N_MOVIES 3091 //1M dataset
-#define N_USERS 71568
-#define N_MOVIES 10682
+#define N_USERS 6041 //1M dataset
+#define N_MOVIES 3091 //1M dataset
+//#define N_USERS 71568
+//#define N_MOVIES 10682
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
@@ -39,11 +39,11 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 64
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 50
+#define RLENGTH 20
 #endif
 
 #ifndef SHOULD_SYNC
@@ -59,7 +59,7 @@
 #endif
 
 #define GAMMA_REDUCTION_FACTOR .8
-double GAMMA = 5e-2;
+double GAMMA = 5e-5;
 double C = 0;
 
 using namespace std;
@@ -77,9 +77,9 @@ int volatile thread_batch_on[NTHREAD];
 int volatile thread_batch_on2[NTHREAD];
 
 //Initialize v and h matrix models
-double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
-//double v_model[N_USERS][RLENGTH];
-//double u_model[N_MOVIES][RLENGTH];
+//double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
+double v_model[N_USERS][RLENGTH];
+double u_model[N_MOVIES][RLENGTH];
 
 #define num_doubles_in_cacheline  (64 / sizeof(double))
 #define cache_align_users  ((N_USERS / num_doubles_in_cacheline+1) * num_doubles_in_cacheline)
@@ -125,11 +125,11 @@ double compute_loss(vector<DataPoint> &p) {
   return sqrt(loss / (double)p.size());
 }
 
-void print_loss_times(vector<DataPoint> &p, Timer t) {
+void print_loss_times(vector<DataPoint> &p, Timer overall_t, Timer gradient_t) {
   pin_to_core(35);
   while (!finished_computation) {
     double loss = compute_loss(p);
-    cout << loss << " " << t.elapsed() << endl;
+    cout << loss << " " << overall_t.elapsed() << " " << gradient_t.elapsed() << endl;
   }
 }
 
@@ -193,7 +193,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
   }
 }
 
-void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id, double **local_v_model, double **local_u_model) {
+void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
   pin_to_core(thread_id);
 
   //double local_v_model[N_USERS][RLENGTH];
@@ -236,8 +236,8 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
 
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
-	//double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
-	//double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
+	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
+	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
 	//local_v_model[x][j] = new_v;
 	//local_u_model[y][j] = new_u;
 	
@@ -250,7 +250,7 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
       }
     }
 
-    for (int i = 0; i < access_length[batch]; i++) {
+    /*for (int i = 0; i < access_length[batch]; i++) {
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       //DataPoint p = access_pattern[i];
       int x = get<0>(p), y = get<1>(p);
@@ -258,7 +258,7 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
 	v_model[x][j] = local_vv_model[thread_id][x][j];
 	u_model[y][j] = local_uu_model[thread_id][y][j];
       }
-    }
+      }*/
   }
 }
 
@@ -361,7 +361,14 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
 	size_t new_size = (size_t)((cur_datapoints_used[i] + total_size_needed[i]) * sizeof(DataPoint));
 	//Round new size to next page length 
 	new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
+	
+	//DataPoint *new_mem = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
+	//memcpy(new_mem, access_pattern[i], old_size);
+	//numa_free(access_pattern[i], old_size);
+	//access_pattern[i] = new_mem;
+	//access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
 	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
+
 	cur_bytes_allocated[i] = new_size;
       }
     }
@@ -441,8 +448,8 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  ifstream in("ml-10M100K/ratings.dat");
-  //ifstream in("ml-1m/ratings.dat");
+  //ifstream in("ml-10M100K/ratings.dat");
+  ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
@@ -551,13 +558,14 @@ void cyclades_movielens_completion() {
   cout << "TOT WORK " << num_work << endl;
   exit(0);*/
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall));
-  }
-
   //Perform cyclades
   Timer gradient_time;
+
+  thread print_loss_time;
+  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
+  }
+
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -642,23 +650,14 @@ void cyclades_movielens_completion_mod_rep() {
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall));
-  }
-
-  double **local_v_model[NTHREAD], **local_u_model[NTHREAD];
-  for (int i = 0; i < NTHREAD; i++) {
-    local_v_model[i] = (double **)numa_alloc_onnode(sizeof(double *) * N_USERS, core_to_node[i]);
-    local_u_model[i] = (double **)numa_alloc_onnode(sizeof(double *) * N_MOVIES, core_to_node[i]);
-    for (int j = 0; j < N_USERS; j++) 
-      local_v_model[i][j] = (double *)numa_alloc_onnode(sizeof(double) * RLENGTH, core_to_node[i]);
-    for (int j = 0; j < N_MOVIES; j++) 
-      local_u_model[i][j] = (double *)numa_alloc_onnode(sizeof(double) * RLENGTH, core_to_node[i]);
-  }
-
   //Perform cyclades
   Timer gradient_time;
+
+  thread print_loss_time;
+  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
+  }
+
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -666,7 +665,7 @@ void cyclades_movielens_completion_mod_rep() {
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points_mod_rep, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j, local_v_model[j], local_u_model[j]));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points_mod_rep, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -724,13 +723,15 @@ void hogwild_completion() {
     access_length[i][0] = n_points_per_thread;
   }
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall));
-  }
 
 //Divide to threads
   Timer gradient_time;
+
+  thread print_loss_time;
+  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
+  }
+
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -762,6 +763,7 @@ void hogwild_completion() {
 }
 
 int main(void) {
+
   pin_to_core(0);
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
@@ -781,7 +783,7 @@ int main(void) {
     cur_datapoints_used[i] = 0;
   }
 
-  for (int i = 0; i < NTHREAD; i++) {
+  /*for (int i = 0; i < NTHREAD; i++) {
     local_vv_model[i] = (double **)numa_alloc_onnode(sizeof(double *)*cache_align_users, core_to_node[i]);
     local_uu_model[i] = (double **)numa_alloc_onnode(sizeof(double *)*cache_align_n_movies, core_to_node[i]);
     for (int j = 0; j < cache_align_users; j++) 
@@ -790,12 +792,12 @@ int main(void) {
       local_uu_model[i][j ] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, core_to_node[i]);
   }
 
-  v_model = (double **)numa_alloc_onnode(sizeof(double *)*cache_align_users, 0);
+  /*v_model = (double **)numa_alloc_onnode(sizeof(double *)*cache_align_users, 0);
   u_model = (double **)numa_alloc_onnode(sizeof(double *)*cache_align_n_movies, 0);
   for (int j = 0; j < cache_align_users; j++) 
     v_model[j] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, 0);
   for (int j = 0; j < cache_align_n_movies; j++)
-    u_model[j] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, 0);
+  u_model[j] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, 0);*/
   
   srand(0);
   for (int i = 0; i < RLENGTH; i++) {
