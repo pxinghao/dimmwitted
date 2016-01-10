@@ -24,10 +24,10 @@
 #define HOG 0
 #endif
 
-#define N_USERS 6041 //1M dataset
-#define N_MOVIES 3091 //1M dataset
-//#define N_USERS 71568
-//#define N_MOVIES 10682
+//#define N_USERS 6041 //1M dataset
+//#define N_MOVIES 3091 //1M dataset
+#define N_USERS 71568
+#define N_MOVIES 10682
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
@@ -39,7 +39,7 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 64
+#define NTHREAD 16
 #endif
 
 #ifndef RLENGTH
@@ -51,7 +51,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #ifndef MOD_REP_CYC
@@ -80,6 +80,10 @@ int volatile thread_batch_on2[NTHREAD];
 //double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
 double v_model[N_USERS][RLENGTH];
 double u_model[N_MOVIES][RLENGTH];
+
+double ** v_model_records[N_EPOCHS];
+double ** u_model_records[N_EPOCHS];
+double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 
 #define num_doubles_in_cacheline  (64 / sizeof(double))
 #define cache_align_users  ((N_USERS / num_doubles_in_cacheline+1) * num_doubles_in_cacheline)
@@ -123,6 +127,44 @@ double compute_loss(vector<DataPoint> &p) {
     loss += diff * diff;
   }
   return sqrt(loss / (double)p.size());
+}
+
+double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
+  double loss = 0;
+  for (int i = 0; i < p.size(); i++) {
+    int x = get<0>(p[i]),  y = get<1>(p[i]);
+    double r = get<2>(p[i]), s = 0, dp = 0;
+    for (int i = 0; i < RLENGTH; i++) {
+      dp += v_model_records[epoch][x][i] * u_model_records[epoch][y][i];
+    }
+    double diff = dp - r - C;
+    loss += diff * diff;
+  }
+  return sqrt(loss / (double)p.size());
+}
+
+double print_loss_for_records(vector<DataPoint> &p) {
+  for (int i = 0; i < N_EPOCHS; i++) {
+    double loss = compute_loss_for_record_epoch(p, i);
+    double overall_time = overall_times[i];
+    double gradient_time = gradient_times[i];
+    cout << loss << " " << overall_time << " " << gradient_time << endl;
+  }
+}
+
+double copy_model_to_records(int epoch, double overall_time, double gradient_time) {
+  gradient_times[epoch] = gradient_time;
+  overall_times[epoch] = overall_time;
+  for (int i = 0; i < N_USERS; i++) {
+    for (int j = 0; j < RLENGTH; j++) {
+      v_model_records[epoch][i][j] = v_model[i][j];
+    }
+  }
+  for (int i = 0; i < N_MOVIES; i++) {
+    for (int j = 0; j < RLENGTH; j++) {
+      u_model_records[epoch][i][j] = u_model[i][j];
+    }
+  }
 }
 
 void print_loss_times(vector<DataPoint> &p, Timer overall_t, Timer gradient_t) {
@@ -448,8 +490,8 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
 vector<DataPoint> get_movielens_data() {
   vector<DataPoint> datapoints;
 
-  //ifstream in("ml-10M100K/ratings.dat");
-  ifstream in("ml-1m/ratings.dat");
+  ifstream in("ml-10M100K/ratings.dat");
+  //ifstream in("ml-1m/ratings.dat");
   string s;
   string delimiter = "::";
   //int m1 = 0, m2 = 0;
@@ -561,11 +603,6 @@ void cyclades_movielens_completion() {
   //Perform cyclades
   Timer gradient_time;
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
-  }
-
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -585,6 +622,7 @@ void cyclades_movielens_completion() {
       }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
   }
   //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
@@ -594,9 +632,8 @@ void cyclades_movielens_completion() {
     cout << gradient_time.elapsed() << endl;
     cout << compute_loss(points) << endl;
   }
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    finished_computation = 1;
-    print_loss_time.join();
+  else {
+    print_loss_for_records(points);
   }
   
   /*for (int i = 0; i < NTHREAD; i++) {
@@ -653,11 +690,6 @@ void cyclades_movielens_completion_mod_rep() {
   //Perform cyclades
   Timer gradient_time;
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
-  }
-
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -675,18 +707,17 @@ void cyclades_movielens_completion_mod_rep() {
       }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
     cout << compute_loss(points) << endl;
   }
-
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    finished_computation = 1;
-    print_loss_time.join();
+  else {
+    print_loss_for_records(points);
   }
-  
+
   /*for (int i = 0; i < NTHREAD; i++) {
     cout << thread_load_balance[i] / (double)n_batches << endl;
   }
@@ -727,11 +758,6 @@ void hogwild_completion() {
 //Divide to threads
   Timer gradient_time;
 
-  thread print_loss_time;
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    print_loss_time = thread(print_loss_times, ref(points), ref(overall), ref(gradient_time));
-  }
-
   for (int i = 0; i < N_EPOCHS; i++) {
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -746,6 +772,7 @@ void hogwild_completion() {
       }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
   }
   //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
   //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
@@ -755,10 +782,8 @@ void hogwild_completion() {
     cout << gradient_time.elapsed() << endl;
     cout << compute_loss(points) << endl;
   }
-
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    finished_computation = 1;
-    print_loss_time.join();
+  else {
+    print_loss_for_records(points);
   }
 }
 
@@ -781,6 +806,17 @@ int main(void) {
   for (int i = 0; i < NTHREAD; i++) {
     cur_bytes_allocated[i] = 0;
     cur_datapoints_used[i] = 0;
+  }
+
+  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+    for (int i = 0; i < N_EPOCHS; i++) {
+      v_model_records[i] = (double **)malloc(sizeof(double *) * N_USERS);
+      u_model_records[i] = (double **)malloc(sizeof(double *) * N_MOVIES);
+      for (int j = 0; j < N_USERS; j++) 
+	v_model_records[i][j] = (double *)malloc(sizeof(double) * RLENGTH);
+      for (int j = 0; j < N_MOVIES; j++) 
+	u_model_records[i][j] = (double *)malloc(sizeof(double) * RLENGTH);
+    }
   }
 
   /*for (int i = 0; i < NTHREAD; i++) {

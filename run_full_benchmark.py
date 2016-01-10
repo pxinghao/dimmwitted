@@ -76,6 +76,8 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 plt.plot(times, losses, label=c)
                         else:
                             plt.plot(times, losses, label=c+" sync="+str(s))
+                plt.set_yscale('log')
+                plt.set_xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -97,6 +99,8 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 plt.plot(times, losses, label=c)
                         else:
                             plt.plot(times, losses, label=c+" sync="+str(s))
+                plt.set_yscale('log')
+                plt.set_xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -352,6 +356,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_all_graphs(1, [10, 50, 150, 200], [200], [16, 8, 4, 2], [10, 200, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_all_graphs(1, [50, 150, 200], [2000], [8, 16, 32], [10, 500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 10)
 draw_all_graphs(0, [10, 30, 80, 100, 150], [2000], [1, 2, 4, 8, 10, 16, 32], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
-draw_time_loss_graph(0, 50, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
+draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 #draw_time_loss_graph(0, 50, [2000], [16], [500], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
     
