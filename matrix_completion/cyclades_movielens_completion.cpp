@@ -51,15 +51,21 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #ifndef MOD_REP_CYC
 #define MOD_REP_CYC 0
 #endif
 
+#ifndef REGULARIZE
+#define REGULARIZE 0
+#endif
+
 #define GAMMA_REDUCTION_FACTOR .8
+
 double GAMMA = 5e-5;
+double ALPHA = .2;
 double C = 0;
 
 using namespace std;
@@ -120,8 +126,22 @@ double compute_loss(vector<DataPoint> &p) {
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
-    for (int i = 0; i < RLENGTH; i++) {
-      dp += v_model[x][i] * u_model[y][i];
+    for (int j = 0; j < RLENGTH; j++) {
+      dp += v_model[x][j] * u_model[y][j];
+    }
+    double diff = dp - r - C;
+    loss += diff * diff;
+  }
+  return sqrt(loss / (double)p.size());
+}
+
+double compute_loss_regularize(vector<DataPoint> &p) {
+  double loss = 0;
+  for (int i = 0; i < p.size(); i++) {
+    int x = get<0>(p[i]),  y = get<1>(p[i]);
+    double r = get<2>(p[i]), s = 0, dp = 0;
+    for (int j = 0; j < RLENGTH; j++) {
+      dp += v_model[x][j] * u_model[y][j];
     }
     double diff = dp - r - C;
     loss += diff * diff;
