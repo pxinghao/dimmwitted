@@ -39,7 +39,7 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 8
 #endif
 
 #ifndef RLENGTH
@@ -79,6 +79,7 @@ struct Comp
   }
 };
 
+//int regularization_bookkeeping[
 int volatile thread_batch_on[NTHREAD];
 int volatile thread_batch_on2[NTHREAD];
 
@@ -140,11 +141,14 @@ double compute_loss_regularize(vector<DataPoint> &p) {
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
+    double reg_v = 0, reg_u = 0;
     for (int j = 0; j < RLENGTH; j++) {
       dp += v_model[x][j] * u_model[y][j];
+      reg_v += v_model[x][j] * v_model[x][j];
+      reg_u += u_model[y][j] * u_model[y][j];
     }
     double diff = dp - r - C;
-    loss += diff * diff;
+    loss += diff * diff + reg_v + reg_u;
   }
   return sqrt(loss / (double)p.size());
 }
@@ -154,8 +158,8 @@ double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
-    for (int i = 0; i < RLENGTH; i++) {
-      dp += v_model_records[epoch][x][i] * u_model_records[epoch][y][i];
+    for (int j = 0; j < RLENGTH; j++) {
+      dp += v_model_records[epoch][x][j] * u_model_records[epoch][y][j];
     }
     double diff = dp - r - C;
     loss += diff * diff;
@@ -163,9 +167,30 @@ double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
   return sqrt(loss / (double)p.size());
 }
 
+double compute_loss_regularize_for_record_epoch(vector<DataPoint> &p, int epoch) {
+  double loss = 0;
+  for (int i = 0; i < p.size(); i++) {
+    int x = get<0>(p[i]),  y = get<1>(p[i]);
+    double r = get<2>(p[i]), s = 0, dp = 0;
+    double reg_u = 0, reg_v = 0;
+    for (int j = 0; j < RLENGTH; j++) {
+      dp += v_model_records[epoch][x][j] * u_model_records[epoch][y][j];
+      reg_v += v_model_records[epoch][x][j] * v_model_records[epoch][x][j];
+      reg_u += u_model_records[epoch][y][j] * u_model_records[epoch][y][j];
+    }
+    double diff = dp - r - C;
+    loss += diff * diff + reg_v + reg_u;
+  }
+  return sqrt(loss / (double)p.size());
+}
+
 double print_loss_for_records(vector<DataPoint> &p) {
   for (int i = 0; i < N_EPOCHS; i++) {
-    double loss = compute_loss_for_record_epoch(p, i);
+    double loss;
+    if (REGULARIZE)
+      loss = compute_loss_regularize_for_record_epoch(p, i);
+    else
+      loss = compute_loss_for_record_epoch(p, i);
     double overall_time = overall_times[i];
     double gradient_time = gradient_times[i];
     cout << loss << " " << overall_time << " " << gradient_time << endl;
@@ -184,14 +209,6 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
     for (int j = 0; j < RLENGTH; j++) {
       u_model_records[epoch][i][j] = u_model[i][j];
     }
-  }
-}
-
-void print_loss_times(vector<DataPoint> &p, Timer overall_t, Timer gradient_t) {
-  pin_to_core(35);
-  while (!finished_computation) {
-    double loss = compute_loss(p);
-    cout << loss << " " << overall_t.elapsed() << " " << gradient_t.elapsed() << endl;
   }
 }
 
@@ -650,7 +667,10 @@ void cyclades_movielens_completion() {
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
-    cout << compute_loss(points) << endl;
+    if (REGULARIZE)
+      cout << compute_loss_regularize(points) << endl;
+    else
+      cout << compute_loss(points) << endl;
   }
   else {
     print_loss_for_records(points);
@@ -732,7 +752,10 @@ void cyclades_movielens_completion_mod_rep() {
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
-    cout << compute_loss(points) << endl;
+    if (REGULARIZE)
+      cout << compute_loss_regularize(points) << endl;
+    else
+      cout << compute_loss(points) << endl;
   }
   else {
     print_loss_for_records(points);
@@ -794,13 +817,14 @@ void hogwild_completion() {
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
   }
-  //cout << "HOGWILD OVERALL TIME: " << overall.elapsed() << endl;
-  //cout << "HOGWILD GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;
+
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
-    cout << compute_loss(points) << endl;
+    if (REGULARIZE)
+      cout << compute_loss_regularize(points) << endl;
+    else
+      cout << compute_loss(points) << endl;
   }
   else {
     print_loss_for_records(points);
@@ -864,7 +888,7 @@ int main(void) {
       u_model[j][i] = ((double)rand()/(double)RAND_MAX);
     }
   }
-  
+
   if (MOD_REP_CYC)
     cyclades_movielens_completion_mod_rep();
   if (CYC)
