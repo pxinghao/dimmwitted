@@ -49,3 +49,8 @@ cyc_movielens_completion_cyc_regularize:
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DCYC=1 -DREGULARIZE=1 -o movielens_completion_cyc_regularize
 	./movielens_completion_cyc_regularize
 
+cyc_movielens_completion_hog_regularize:
+	rm -rf movielens_completion_cyc
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -DHOG=1 -DREGULARIZE=1 -o movielens_completion_hog_regularize
+	./movielens_completion_hog_regularize
+

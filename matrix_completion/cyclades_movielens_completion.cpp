@@ -43,7 +43,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 20
+#define RLENGTH 30
 #endif
 
 #ifndef SHOULD_SYNC
@@ -64,8 +64,8 @@
 
 #define GAMMA_REDUCTION_FACTOR .8
 
-double GAMMA = 5e-5;
-double ALPHA = .2;
+double GAMMA = 5e-2;
+double ALPHA = 1e-3;
 double C = 0;
 
 using namespace std;
@@ -82,6 +82,9 @@ struct Comp
 //int regularization_bookkeeping[
 int volatile thread_batch_on[NTHREAD];
 int volatile thread_batch_on2[NTHREAD];
+
+//Bookkeeping
+int volatile bookkeeping_v[N_USERS], bookkeeping_u[N_MOVIES];
 
 //Initialize v and h matrix models
 //double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
@@ -122,6 +125,11 @@ void pin_to_core(size_t core) {
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
+void clear_bookkeeping() {
+  for (int i = 0; i < N_USERS; i++) bookkeeping_v[i] = -1;
+  for (int i = 0; i < N_MOVIES; i++) bookkeeping_u[i] = -1;
+}
+
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
   for (int i = 0; i < p.size(); i++) {
@@ -141,16 +149,26 @@ double compute_loss_regularize(vector<DataPoint> &p) {
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
-    double reg_v = 0, reg_u = 0;
     for (int j = 0; j < RLENGTH; j++) {
       dp += v_model[x][j] * u_model[y][j];
-      reg_v += v_model[x][j] * v_model[x][j];
-      reg_u += u_model[y][j] * u_model[y][j];
     }
     double diff = dp - r - C;
-    loss += diff * diff + reg_v + reg_u;
+    loss += diff * diff;
   }
-  return sqrt(loss / (double)p.size());
+
+  double loss2 = 0, loss3 = 0;
+  for (int i = 0; i < N_USERS; i++) {
+    for (int k = 0; k < RLENGTH; k++) {
+      loss2 += v_model[i][k] * v_model[i][k];
+    }
+  }
+  for (int i = 0; i < N_MOVIES; i++) {
+    for (int k = 0; k < RLENGTH; k++) {
+      loss2 += u_model[i][k] * u_model[i][k];
+    }
+  }
+
+  return sqrt(loss / (double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
 }
 
 double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
@@ -172,16 +190,26 @@ double compute_loss_regularize_for_record_epoch(vector<DataPoint> &p, int epoch)
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
-    double reg_u = 0, reg_v = 0;
     for (int j = 0; j < RLENGTH; j++) {
       dp += v_model_records[epoch][x][j] * u_model_records[epoch][y][j];
-      reg_v += v_model_records[epoch][x][j] * v_model_records[epoch][x][j];
-      reg_u += u_model_records[epoch][y][j] * u_model_records[epoch][y][j];
     }
     double diff = dp - r - C;
-    loss += diff * diff + reg_v + reg_u;
+    loss += diff * diff;
   }
-  return sqrt(loss / (double)p.size());
+
+  double loss2 = 0, loss3 = 0;
+  for (int i = 0; i < N_USERS; i++) {
+    for (int k = 0; k < RLENGTH; k++) {
+      loss2 += v_model_records[epoch][i][k] * v_model_records[epoch][i][k];
+    }
+  }
+  for (int i = 0; i < N_MOVIES; i++) {
+    for (int k = 0; k < RLENGTH; k++) {
+      loss2 += u_model_records[epoch][i][k] * u_model_records[epoch][i][k];
+    }
+  }
+
+  return sqrt(loss / (double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
 }
 
 double print_loss_for_records(vector<DataPoint> &p) {
@@ -214,18 +242,8 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
 
 void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
   pin_to_core(thread_id);
-  //numa_run_on_node(core_to_node[thread_id]);
-  //Keep track of local model
 
   for (int batch = 0; batch < access_length.size(); batch++) {
-
-    //Update local model
-    /*for (int i = 0; i < RLENGTH; i++) {
-      for (int j = 0; j < max(N_USERS, N_MOVIES); j++) {
-	if (j < N_USERS) local_v_model[j][i] = v_model[j][i];
-	if (j < N_MOVIES) local_u_model[j][i] = u_model[j][i];
-      }
-      }*/
     
     if (SHOULD_SYNC) {
       //Wait for all threads to be on the same batch
@@ -253,20 +271,31 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
-	//gradient += local_v_model[x][j] * local_u_model[y][j];
       }
       gradient -= r + C;
 
+      double v_reg_param = 1, u_reg_param = 1;
+      if (REGULARIZE) {
+	double v_diff = batch - bookkeeping_v[x];
+	double u_diff = batch - bookkeeping_u[y];
+	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
+	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
+      }
+
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
+	v_model[x][j] = v_reg_param * v_model[x][j];
+	u_model[y][j] = u_reg_param * u_model[y][j];
 	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
 	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
 	u_model[y][j] = new_u;
-	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
-	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
-	//local_v_model[x][j] = 24;
-	//local_u_model[y][j] = 50;
+      }
+
+      //Update bookkeeping
+      if (REGULARIZE) {
+	bookkeeping_v[x] = batch;
+	bookkeeping_u[y] = batch;
       }
     }
   }
@@ -296,7 +325,6 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
       }
     }
     
-
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
       //Compute gradient
@@ -406,8 +434,6 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
-  //cout << "AVG CC SIZE : " << avg_cc_size << endl;
-  //cout << "MAX CC SIZE : " << max_cc_size << endl;
   
   //Allocate memory
   int index_count[NTHREAD];
@@ -415,16 +441,6 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
   for (int i = 0; i < NTHREAD; i++) {
     //int numa_node = i % 2;
     int numa_node = core_to_node[i];
-    //numa_run_on_node(numa_node);
-    //numa_set_localalloc();
-    //access_pattern[i][batchnum] = (int *)numa_alloc_onnode(total_size_needed[i] * sizeof(int), numa_node);
-    //access_pattern[i][batchnum] = new int[total_size_needed[i]];
-    //access_pattern[i][batchnum] = new int[total_size_needed[i]];
-    //access_pattern[i][batchnum] = (DataPoint *)numa_alloc_onnode(total_size_needed[i] * sizeof(DataPoint), numa_node);
-    //access_pattern[i][batchnum] = (DataPoint *)malloc(total_size_needed[i] * sizeof(DataPoint));
-    //access_pattern[i][batchnum] = new DataPoint[total_size_needed[i]];
-    //access_pattern[i][batchnum] = vector<DataPoint>(total_size_needed[i]);
-    //access_pattern[i][batchnum] = (int *)malloc(total_size_needed[i] * sizeof(int));
 
     batch_index_start[i][batchnum] = cur_datapoints_used[i];
     if (cur_bytes_allocated[i] == 0) {
@@ -457,13 +473,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
       exit(0);
     }
       
-    /*if (access_pattern[i][batchnum] == NULL) {
-      cout << "OUT OF MEMORY" << endl;
-      exit(0);
-      }*/
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
-    //cout << "THREAD " << i << " NUM DATAPOINTS: " << total_size_needed[i] << endl;
     thread_load_balance[i] += total_size_needed[i];
     max_load = max(max_load, (int)total_size_needed[i]);
   }
@@ -475,12 +486,6 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
       access_pattern[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = points[cc[i]];
-      //cout << chosen_thread << " " << batchnum << " " << index_count[chosen_thread] << " "  << endl;
-      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
-      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = points[cc[i]];
-      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = DataPoint(1,2,3);
-      //cout << access_pattern[chosen_thread][batchnum] << endl;
-      //access_pattern[chosen_thread][batchnum][index_count[chosen_thread]+i] = cc[i];
     }
     index_count[chosen_thread] += cc.size();
   }
@@ -618,37 +623,20 @@ void cyclades_movielens_completion() {
 
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
-  //cout << cc_time << " " << alloc_time << endl;
-
-  /*int num_work = 0;
-  //for (int j = 0; j < n_batches; j++) {
-  for (int j = 0; j < 1; j++) {
-      cout << "BATCH " << j << endl;
-    for (int i = 0; i < NTHREAD; i++) {
-      cout << access_length[i][j] << " : ";
-      cout << "THREAD " << i << endl;
-      num_work += access_length[i][j];
-      for (int k = 0; k < min(10, access_length[i][j]); k++) {
-	cout << access_pattern[i][j][k] << " ";
-      }
-      cout << endl;
-    }
-  }
-  cout << "TOT WORK " << num_work << endl;
-  exit(0);*/
 
   //Perform cyclades
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (REGULARIZE) {
+      clear_bookkeeping();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	//numa_run_on_node((j+1) % N_NUMA_NODES);
-	//numa_run_on_node(core_to_node[j]);
 	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
       }
       for (int j = 0; j < threads.size(); j++) {
@@ -661,9 +649,7 @@ void cyclades_movielens_completion() {
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
   }
-  //cout << "CYCLADES OVERALL TIME: " << overall.elapsed() << endl;
-  //cout << "CYCLADES GRADIENT TIME: " << gradient_time.elapsed() << endl;
-  //cout << "LOSS: " << compute_loss(points) << endl;;
+
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
@@ -675,11 +661,6 @@ void cyclades_movielens_completion() {
   else {
     print_loss_for_records(points);
   }
-  
-  /*for (int i = 0; i < NTHREAD; i++) {
-    cout << thread_load_balance[i] / (double)n_batches << endl;
-  }
-  cout << load_balance_avg_max / (double)n_batches << endl;*/
 }
 
 void cyclades_movielens_completion_mod_rep() {
@@ -731,6 +712,9 @@ void cyclades_movielens_completion_mod_rep() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (REGULARIZE) {
+      clear_bookkeeping();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
@@ -760,11 +744,6 @@ void cyclades_movielens_completion_mod_rep() {
   else {
     print_loss_for_records(points);
   }
-
-  /*for (int i = 0; i < NTHREAD; i++) {
-    cout << thread_load_balance[i] / (double)n_batches << endl;
-  }
-  cout << load_balance_avg_max / (double)n_batches << endl;*/
 }
 
 void hogwild_completion() {
@@ -798,10 +777,13 @@ void hogwild_completion() {
   }
 
 
-//Divide to threads
+  //Divide to threads
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (REGULARIZE) {
+      clear_bookkeeping();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], 0);
