@@ -31,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 150
 #endif
 
 #ifndef BATCH_SIZE
@@ -43,15 +43,15 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 30
+#define RLENGTH 200
 #endif
 
 #ifndef SHOULD_SYNC
-#define SHOULD_SYNC 1
+#define SHOULD_SYNC 0
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #ifndef MOD_REP_CYC
@@ -64,8 +64,8 @@
 
 #define GAMMA_REDUCTION_FACTOR .8
 
-double GAMMA = 5e-2;
-double ALPHA = 1e-3;
+double GAMMA = 5e-5;
+double ALPHA = 1e-2;
 double C = 0;
 
 using namespace std;
@@ -393,8 +393,18 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       }
       gradient -= r + C;
 
+      double v_reg_param = 1, u_reg_param = 1;
+      if (REGULARIZE) {
+	double v_diff = batch - bookkeeping_v[x];
+	double u_diff = batch - bookkeeping_u[y];
+	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
+	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
+      }
+
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
+	v_model[x][j] = v_reg_param * v_model[x][j];
+	u_model[y][j] = u_reg_param * u_model[y][j];
 	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
 	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
 	v_model[x][j] = new_v;
@@ -403,6 +413,12 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
 	//local_v_model[x][j] = 24;
 	//local_u_model[y][j] = 50;
+      }
+
+      //Update bookkeeping
+      if (REGULARIZE) {
+	bookkeeping_v[x] = batch;
+	bookkeeping_u[y] = batch;
       }
     }
   }
