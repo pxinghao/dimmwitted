@@ -51,7 +51,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #ifndef MOD_REP_CYC
@@ -65,7 +65,7 @@
 #define GAMMA_REDUCTION_FACTOR .8
 
 double GAMMA = 5e-5;
-double ALPHA = 1e-2;
+double ALPHA = 5e-3;
 double C = 0;
 
 using namespace std;
