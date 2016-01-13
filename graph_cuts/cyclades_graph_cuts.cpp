@@ -13,12 +13,15 @@
 #include <numa.h>
 #include <sched.h>
 
-#define GRAPH_CUTS_FILE "liver.n6c10.max"
+//#define GRAPH_CUTS_FILE "liver.n6c10.max"
+//#define N_NODES 4161602 + 1 //liver dataset
+//#define N_DATAPOINTS 25138821 //liver dataset
 
-#define N_NODES 4161602 + 1 //liver dataset
-#define N_DATAPOINTS 25138821 //liver dataset
+#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+#define N_NODES 110594 + 1 //tsukuba dataset
+#define N_DATAPOINTS 514483 //tsukuba dataset
 
-#define NTHREAD 16
+#define NTHREAD 8
 #define N_EPOCHS 500
 #define BATCH_SIZE 2000
 
@@ -309,6 +312,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
 	//access_pattern[i] = new_mem;
 	//access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
 	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
+	//access_pattern[i] = (DataPoint *)realloc(access_pattern[i], new_size);
 
 	cur_bytes_allocated[i] = new_size;
       }
@@ -600,9 +604,5 @@ int main(void) {
   }
   if (CYC) {
     cyc_graph_cuts();
-  }
-
-  for (int i = 0; i < NTHREAD; i++) {
-    cout << workk[i] << endl;
   }
 }
