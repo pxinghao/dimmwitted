@@ -23,7 +23,8 @@
 
 #define NTHREAD 8
 #define N_EPOCHS 500
-#define BATCH_SIZE 2000
+//#define BATCH_SIZE 2600000
+#define BATCH_SIZE 20000
 
 #ifndef HOG
 #define HOG 0
@@ -37,16 +38,21 @@
 #define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
+#ifndef SHOULD_SYNC
+#define SHOULD_SYNC 1
+#endif
+
 //k way cuts
 #define K 2
+#define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-10;
+double GAMMA = 1e-5;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
 double avg_gradients[N_NODES][K], prev_gradients[N_NODES][K];
-double model[N_NODES][K];
+double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
 int terminal_nodes[K];
 int bookkeeping[N_NODES];
@@ -58,8 +64,6 @@ int cur_datapoints_used[NTHREAD];
 int core_to_node[NTHREAD];
 
 int workk[NTHREAD];
-
-double load_balance_avg_max = 0;
 
 using namespace std;
 typedef tuple<int, int, double> DataPoint;
@@ -131,24 +135,45 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
   }
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
+void project_constraint_2(double *vec) {
+  double sorted[2] = {max(vec[0], vec[1]), min(vec[0], vec[1])};
+  double sums[2] = {sorted[0], sorted[0]+sorted[1]};
+  double first = sorted[0] - (sums[0] - 1);
+  double second = sorted[1] - .5 * (sums[1] - 1);
+  if (first <= 0 && second <= 0) cout << "WTF" << endl;
+  int p = (second > 0) ? 2 : 1;
+  double theta = 1 / (double)p * (sums[p-1] - 1);
+  vec[0] = max((double)0, vec[0]-theta);
+  vec[1] = max((double)0, vec[1]-theta);
+}
+
+int is_anchor(int coord) {
+  for (int i = 0; i < K; i++) {
+    if (terminal_nodes[i] == coord) return 1;
+  }
+  return 0;
+}
+
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
   pin_to_core(thread_id);
 
   for (int batch = 0; batch < access_length.size(); batch++) {
     
     //Wait for all threads to be on the same batch
-    thread_batch_on[thread_id] = batch;    
-    int waiting_for_other_threads = 1;
-    while (waiting_for_other_threads) {
-      waiting_for_other_threads = 0;
-      for (int ii = 0; ii < NTHREAD; ii++) {
-	if (thread_batch_on[ii] < batch) {
-	  waiting_for_other_threads = 1;
-	  break;
+    if (SHOULD_SYNC) {
+      thread_batch_on[thread_id] = batch;    
+      int waiting_for_other_threads = 1;
+      while (waiting_for_other_threads) {
+	waiting_for_other_threads = 0;
+	for (int ii = 0; ii < NTHREAD; ii++) {
+	  if (thread_batch_on[ii] < batch) {
+	    waiting_for_other_threads = 1;
+	    break;
+	  }
 	}
       }
     }
-    
+
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
 
@@ -156,55 +181,46 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);
+      int update_order = order[batch_index_start[batch]+i];
+      int diff_x = (update_order * 2) - bookkeeping[x];
+      int diff_y = (update_order * 2 + 1) - bookkeeping[y];
+      int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
 
-      //int diff_x = batch - bookkeeping[x];
-      //int diff_y = batch - bookkeeping[y];
-      
       //Apply gradient update
       for (int j = 0; j < K; j++) {
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
-
-	//workk[thread_id]++;
 	
-	//Catch up
-	/*model[x][j] = model[x][j] - GAMMA * diff_x * avg_gradients[x][j];
-	model[y][j] = model[y][j] - GAMMA * diff_y * avg_gradients[y][j];
+	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 
-	//Gradient update
-	model[x][j] = model[x][j] - GAMMA * (gradient[j] - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] = model[y][j] - GAMMA * (gradient[j] * -1 - prev_gradients[y][j] + avg_gradients[y][j]);      
+	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      */
+	
+	model[x][j] -= GAMMA * gradient * should_update_x;
+	model[y][j] += GAMMA * gradient * should_update_y;
 
-	avg_gradients[x][j] += (gradient[j] - prev_gradients[x][j]) / (double)(N_DATAPOINTS);
-	avg_gradients[y][j] += (gradient[j] * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
-	prev_gradients[x][j] = gradient[j];
-	prev_gradients[y][j] = gradient[j] * -1;*/
-
-	double new_x = model[x][j] - GAMMA * gradient;
-	double new_y = model[y][j] - GAMMA * gradient * -1;
-	model[x][j] = new_x;
-	model[y][j] = new_y;
+	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
+	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
+	prev_gradients[y][j] = gradient * -1;
+	prev_gradients[x][j] = gradient;
       }
-    
       //Update bookkeeping
-      //bookkeeping[x] = bookkeeping[y] = batch;
-      
-      //Update avg gradients
-      /*for (int j = 0; j < K; j++) {
-	avg_gradients[x][j] += (gradient[j] - prev_gradients[x][j]) / (double)(N_DATAPOINTS);
-	avg_gradients[y][j] += (gradient[j] * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
-	prev_gradients[x][j] = gradient[j];
-	prev_gradients[y][j] = gradient[j] * -1;
-	}*/
+      bookkeeping[x] = update_order * 2;
+      bookkeeping[y] = update_order * 2 + 1;
+
+      //Projections
+      if (K == 2) {
+	project_constraint_2((double *)&model[x]);
+	project_constraint_2((double *)&model[y]);
+      }
     }
   }
 }
 
-void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
+void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
   pin_to_core(thread_id);
-
-  double gradient[K];
 
   for (int batch = 0; batch < access_length.size(); batch++) {
     
@@ -214,46 +230,47 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       //Compute gradient
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       int x = get<0>(p), y = get<1>(p);
+      int update_order = order[batch_index_start[batch]+i];
       double r = get<2>(p);            
 
+      int diff_x = update_order - bookkeeping[x];
+      int diff_y = update_order - bookkeeping[y];
 
-      //int diff_x = batch - bookkeeping[x];
-      //int diff_y = batch - bookkeeping[y];
-      
+      if (diff_x < 0) diff_x = 1;
+      if (diff_y < 0) diff_y = 1;
+      int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
+
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 
-	//workk[thread_id]++;
-	
-	//Catch up
-	/*model[x][j] = model[x][j] - GAMMA * diff_x * avg_gradients[x][j];
-	model[y][j] = model[y][j] - GAMMA * diff_y * avg_gradients[y][j];
-	
-	//Gradient update
-	model[x][j] = model[x][j] - GAMMA * (gradient[j] - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] = model[y][j] - GAMMA * (gradient[j] * -1 - prev_gradients[y][j] + avg_gradients[y][j]);      */
+	//model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	//model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 
-	double new_x = model[x][j] - GAMMA * gradient;
-	double new_y = model[y][j] - GAMMA * gradient * -1;
-	model[x][j] = new_x;
-	model[y][j] = new_y;
+	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	//model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
+	
+	model[x][j] -= GAMMA * gradient * should_update_x;
+	model[y][j] += GAMMA * gradient * should_update_y;
+
+	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
+	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
+	prev_gradients[y][j] = gradient * -1;
+	prev_gradients[x][j] = gradient;
       }
-    
+
       //Update bookkeeping
-      /*bookkeeping[x] = bookkeeping[y] = batch;
-      
-      //Update avg gradients
-      for (int j = 0; j < K; j++) {
-	avg_gradients[x][j] += (gradient[j] - prev_gradients[x][j]) / (double)(N_DATAPOINTS);
-	avg_gradients[y][j] += (gradient[j] * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
-	prev_gradients[x][j] = gradient[j];
-	prev_gradients[y][j] = gradient[j] * -1;
-	}*/
+      bookkeeping[x] = update_order * 2;
+      bookkeeping[y] = update_order * 2 + 1;      
+
+      //Projections
+      if (K == 2) {
+	project_constraint_2((double *)&model[x]);
+	project_constraint_2((double *)&model[y]);
       }
+    }
   }
 }
 
@@ -459,6 +476,21 @@ void cyc_graph_cuts() {
     distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);
     alloc_time += ttt2.elapsed();
   }
+
+  //Order of the updates
+  int *order[NTHREAD];
+  int cur_order = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
+					core_to_node[i]);
+  }
+  for (int i = 0; i < n_batches; i++) {
+    for (int j = 0; j < NTHREAD; j++) {
+      for (int k = 0; k < access_length[j][i]; k++) {
+	order[j][batch_index_start[j][i]+k] = cur_order++;
+      }
+    }
+  }
  
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
@@ -470,11 +502,11 @@ void cyc_graph_cuts() {
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -501,7 +533,7 @@ void cyc_graph_cuts() {
 void hog_graph_cuts() {
   vector<DataPoint> points = get_graph_cuts_data();
   initialize_model();
-
+  random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Hogwild access pattern construction
@@ -527,6 +559,19 @@ void hog_graph_cuts() {
     access_length[i][0] = n_points_per_thread;
   }
 
+  //Order of the updates
+  int *order[NTHREAD];
+  int cur_order = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);			
+  }
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < NTHREAD; j++) {
+      for (int k = 0; k < access_length[j][i]; k++) {
+	order[j][batch_index_start[j][i]+k] = cur_order++;
+      }
+    }
+  }
 
   //Divide to threads
   Timer gradient_time;
@@ -535,11 +580,11 @@ void hog_graph_cuts() {
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], 0);
+      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
