@@ -46,7 +46,7 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 1e-4;
+double GAMMA = 5e-6;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -84,7 +84,7 @@ void pin_to_core(size_t core) {
 
 void clear_bookkeeping() {
   for (int i = 0; i < N_NODES; i++) 
-    bookkeeping[i] = -1;
+    bookkeeping[i] = 0;
 }
 
 double compute_loss(vector<DataPoint> points) {
@@ -182,9 +182,10 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);
       int update_order = order[batch_index_start[batch]+i];
-      int diff_x = (update_order * 2) - bookkeeping[x];
-      int diff_y = (update_order * 2 + 1) - bookkeeping[y];
       int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
+
+      int diff_x = update_order - bookkeeping[x] - 1;
+      int diff_y = update_order - bookkeeping[y] - 1;
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -192,11 +193,11 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 	
-	//model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
-	//model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
+	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 	
-	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	//model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
+	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      */
 	
 	model[x][j] -= GAMMA * gradient * should_update_x;
 	model[y][j] += GAMMA * gradient * should_update_y;
@@ -207,8 +208,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	prev_gradients[x][j] = gradient;
       }
       //Update bookkeeping
-      bookkeeping[x] = update_order * 2;
-      bookkeeping[y] = update_order * 2 + 1;
+      bookkeeping[x] = update_order;
+      bookkeeping[y] = update_order;
 
       //Projections
       if (K == 2) {
@@ -233,11 +234,11 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       int update_order = order[batch_index_start[batch]+i];
       double r = get<2>(p);            
 
-      int diff_x = update_order - bookkeeping[x];
-      int diff_y = update_order - bookkeeping[y];
+      int diff_x = update_order - bookkeeping[x] - 1;
+      int diff_y = update_order - bookkeeping[y] - 1;
 
-      if (diff_x < 0) diff_x = 1;
-      if (diff_y < 0) diff_y = 1;
+      //if (diff_x < 1) diff_x = 1;
+      //if (diff_y < 1) diff_y = 1;
       int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
 
       //Apply gradient update
@@ -246,14 +247,14 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 
-	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
-
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
 	
-	//model[x][j] -= GAMMA * gradient * should_update_x;
-	//model[y][j] += GAMMA * gradient * should_update_y;
+	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      */
+	
+	model[x][j] -= GAMMA * gradient * should_update_x;
+	model[y][j] += GAMMA * gradient * should_update_y;
 
 	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
 	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
@@ -262,8 +263,8 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       }
 
       //Update bookkeeping
-      bookkeeping[x] = update_order * 2;
-      bookkeeping[y] = update_order * 2 + 1;      
+      bookkeeping[x] = update_order;
+      bookkeeping[y] = update_order;
 
       //Projections
       if (K == 2) {
@@ -479,7 +480,7 @@ void cyc_graph_cuts() {
 
   //Order of the updates
   int *order[NTHREAD];
-  int cur_order = 0;
+  int cur_order = 1;
   for (int i = 0; i < NTHREAD; i++) {
     order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
 					core_to_node[i]);
@@ -561,7 +562,7 @@ void hog_graph_cuts() {
 
   //Order of the updates
   int *order[NTHREAD];
-  int cur_order = 0;
+  int cur_order = 1;
   for (int i = 0; i < NTHREAD; i++) {
     order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);			
   }
