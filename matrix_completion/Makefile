@@ -18,6 +18,13 @@ cyc_movielens_hog_regularize_compile:
 cyc_movielens_hog_regularize_run:
 	@./movielens_hog_regularize
 
+cyc_movielens_hog_regularize_crimp_compile:
+	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_hog_regularize \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DCRIMP=1 -DHOG=1 -DCYC=0 -DMOD_REP_CYC=0 -DREGULARIZE=1
+cyc_movielens_hog_regularize_crimp_run:
+	@./movielens_hog_regularize
+
 cyc_movielens_cyc_regularize_compile:
 	g++ -Ofast -std=c++11 cyclades_movielens_completion.cpp -lnuma -lpthread -o movielens_cyc_regularize \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DRLENGTH=$(RLENGTH) \

@@ -39,11 +39,11 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 16
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 20
+#define RLENGTH 200
 #endif
 
 #ifndef SHOULD_SYNC

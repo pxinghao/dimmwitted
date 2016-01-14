@@ -73,10 +73,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c)
+                                plt.plot(times, losses, label=c, marker='o')
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s))
-                #plt.yscale('log')
+                            plt.plot(times, losses, label=c+" sync="+str(s), marker='o')
+                plt.yscale('log')
                 #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
@@ -96,10 +96,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c)
+                                plt.plot(times, losses, label=c, marker='o')
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s))
-                #plt.yscale('log')
+                            plt.plot(times, losses, label=c+" sync="+str(s), marker='o')
+                plt.yscale('log')
                 #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
@@ -356,5 +356,5 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_all_graphs(0, [10, 30, 80, 100, 150], [2000], [1, 2, 4, 8, 10, 16, 32], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 
-draw_time_loss_graph(1, 200, [5000], [8], [20], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize", "cyc_movielens_hog_regularize_crimp"])
+draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16], [200], [0, 1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
     
