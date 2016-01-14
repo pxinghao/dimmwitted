@@ -22,7 +22,7 @@
 #define N_DATAPOINTS 514483 //tsukuba dataset
 
 #define NTHREAD 8
-#define N_EPOCHS 500
+#define N_EPOCHS 50000
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
 
@@ -46,7 +46,7 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 1e-5;
+double GAMMA = 1e-4;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -192,11 +192,11 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 	
-	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
-	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
-
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      */
+	//model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	//model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
+	
+	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	//model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
 	
 	model[x][j] -= GAMMA * gradient * should_update_x;
 	model[y][j] += GAMMA * gradient * should_update_y;
@@ -246,14 +246,14 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 
-	//model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
-	//model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
+	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 
-	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	//model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
+	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
 	
-	model[x][j] -= GAMMA * gradient * should_update_x;
-	model[y][j] += GAMMA * gradient * should_update_y;
+	//model[x][j] -= GAMMA * gradient * should_update_x;
+	//model[y][j] += GAMMA * gradient * should_update_y;
 
 	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
 	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
@@ -517,7 +517,7 @@ void cyc_graph_cuts() {
     }
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
-    //cout << compute_loss(points) << endl;
+    cout << compute_loss(points) << endl;
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -592,7 +592,7 @@ void hog_graph_cuts() {
     }
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
-    //cout << compute_loss(points) << endl;
+    cout << compute_loss(points) << endl;
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {

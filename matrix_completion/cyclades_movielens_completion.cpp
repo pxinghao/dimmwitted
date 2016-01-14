@@ -31,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 150
+#define N_EPOCHS 30
 #endif
 
 #ifndef BATCH_SIZE
@@ -39,15 +39,15 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 16
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 200
+#define RLENGTH 20
 #endif
 
 #ifndef SHOULD_SYNC
-#define SHOULD_SYNC 0
+#define SHOULD_SYNC 1
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
@@ -59,13 +59,13 @@
 #endif
 
 #ifndef REGULARIZE
-#define REGULARIZE 0
+#define REGULARIZE 1
 #endif
 
-#define GAMMA_REDUCTION_FACTOR .8
+#define GAMMA_REDUCTION_FACTOR 1
 
 double GAMMA = 5e-5;
-double ALPHA = 5e-3;
+double ALPHA = 1 / (double)(RLENGTH * (N_MOVIES + N_USERS));
 double C = 0;
 
 using namespace std;
@@ -168,7 +168,7 @@ double compute_loss_regularize(vector<DataPoint> &p) {
     }
   }
 
-  return sqrt(loss / (double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
+  return sqrt(loss/(double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
 }
 
 double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
@@ -240,7 +240,7 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
   }
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
   pin_to_core(thread_id);
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -268,6 +268,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);            
       double gradient = 0;
+      int update_order = order[batch_index_start[batch]+i];
       
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
@@ -276,8 +277,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       double v_reg_param = 1, u_reg_param = 1;
       if (REGULARIZE) {
-	double v_diff = batch - bookkeeping_v[x];
-	double u_diff = batch - bookkeeping_u[y];
+	double v_diff = update_order - bookkeeping_v[x];
+	double u_diff = update_order - bookkeeping_u[y];
 	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
 	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
       }
@@ -294,8 +295,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Update bookkeeping
       if (REGULARIZE) {
-	bookkeeping_v[x] = batch;
-	bookkeeping_u[y] = batch;
+	bookkeeping_v[x] = update_order;
+	bookkeeping_u[y] = update_order;
       }
     }
   }
@@ -371,7 +372,7 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
 
 
 
-void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int thread_id) {
+void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
   pin_to_core(thread_id);
   //numa_run_on_node(core_to_node[thread_id]);
   //Keep track of local model
@@ -384,6 +385,7 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       //DataPoint p = access_pattern[i];
       int x = get<0>(p), y = get<1>(p);
+      int update_order = order[batch_index_start[batch]+i];
       double r = get<2>(p);            
       double gradient = 0;
       
@@ -395,8 +397,10 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 
       double v_reg_param = 1, u_reg_param = 1;
       if (REGULARIZE) {
-	double v_diff = batch - bookkeeping_v[x];
-	double u_diff = batch - bookkeeping_u[y];
+	double v_diff = update_order - bookkeeping_v[x];
+	double u_diff = update_order - bookkeeping_u[y];
+	if (v_diff < 0) v_diff = 0;
+	if (u_diff < 0) u_diff = 0;
 	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
 	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
       }
@@ -417,8 +421,8 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 
       //Update bookkeeping
       if (REGULARIZE) {
-	bookkeeping_v[x] = batch;
-	bookkeeping_u[y] = batch;
+	bookkeeping_v[x] = update_order;
+	bookkeeping_u[y] = update_order;
       }
     }
   }
@@ -640,20 +644,36 @@ void cyclades_movielens_completion() {
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
+  //Order of the updates
+  int *order[NTHREAD];
+  int cur_order = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
+					core_to_node[i]);
+  }
+  for (int i = 0; i < n_batches; i++) {
+    for (int j = 0; j < NTHREAD; j++) {
+      for (int k = 0; k < access_length[j][i]; k++) {
+	order[j][batch_index_start[j][i]+k] = cur_order++;
+      }
+    }
+  }
+
   //Perform cyclades
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
     if (REGULARIZE) {
+      //cout << compute_loss_regularize(points) << endl;
       clear_bookkeeping();
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));      
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));      
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -724,6 +744,21 @@ void cyclades_movielens_completion_mod_rep() {
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
+  //Order of the updates
+  int *order[NTHREAD];
+  int cur_order = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
+					core_to_node[i]);
+  }
+  for (int i = 0; i < n_batches; i++) {
+    for (int j = 0; j < NTHREAD; j++) {
+      for (int k = 0; k < access_length[j][i]; k++) {
+	order[j][batch_index_start[j][i]+k] = cur_order++;
+      }
+    }
+  }
+
   //Perform cyclades
   Timer gradient_time;
 
@@ -733,7 +768,7 @@ void cyclades_movielens_completion_mod_rep() {
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0],0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
@@ -792,21 +827,35 @@ void hogwild_completion() {
     access_length[i][0] = n_points_per_thread;
   }
 
+  //Order of the updates
+  int *order[NTHREAD];
+  int cur_order = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+    order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);	
+  }
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < NTHREAD; j++) {
+      for (int k = 0; k < access_length[j][i]; k++) {
+	order[j][batch_index_start[j][i]+k] = cur_order++;
+      }
+    }
+  }
 
   //Divide to threads
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
     if (REGULARIZE) {
+      //cout << compute_loss_regularize(points) << endl;
       clear_bookkeeping();
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], 0);
+      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
