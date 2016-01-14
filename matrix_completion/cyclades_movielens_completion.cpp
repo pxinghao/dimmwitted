@@ -31,15 +31,15 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 30
+#define N_EPOCHS 200
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 2000
+#define BATCH_SIZE 5000
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 8
 #endif
 
 #ifndef RLENGTH
@@ -60,6 +60,10 @@
 
 #ifndef REGULARIZE
 #define REGULARIZE 1
+#endif
+
+#ifndef CRIMP
+#define CRIMP 0
 #endif
 
 #define GAMMA_REDUCTION_FACTOR 1
@@ -84,12 +88,10 @@ int volatile thread_batch_on[NTHREAD];
 int volatile thread_batch_on2[NTHREAD];
 
 //Bookkeeping
-int volatile bookkeeping_v[N_USERS], bookkeeping_u[N_MOVIES];
+int bookkeeping_v[N_USERS], bookkeeping_u[N_MOVIES];
 
 //Initialize v and h matrix models
 //double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
-double v_model[N_USERS][RLENGTH];
-double u_model[N_MOVIES][RLENGTH];
 
 double ** v_model_records[N_EPOCHS];
 double ** u_model_records[N_EPOCHS];
@@ -99,6 +101,10 @@ double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 #define cache_align_users  ((N_USERS / num_doubles_in_cacheline+1) * num_doubles_in_cacheline)
 #define cache_align_rlength  ((RLENGTH / num_doubles_in_cacheline+1) * num_doubles_in_cacheline)
 #define cache_align_n_movies  ((N_MOVIES / num_doubles_in_cacheline+1) * num_doubles_in_cacheline)
+#define cache_length_rlength ((RLENGTH / 8 + 1) * 8)
+
+double v_model[N_USERS][cache_length_rlength] __attribute__((aligned(64)));
+double u_model[N_MOVIES][cache_length_rlength] __attribute__((aligned(64)));
 
 //double local_vv_model[NTHREAD][N_USERS][RLENGTH];
 //double local_uu_model[NTHREAD][N_MOVIES][RLENGTH];
@@ -126,8 +132,8 @@ void pin_to_core(size_t core) {
 }
 
 void clear_bookkeeping() {
-  for (int i = 0; i < N_USERS; i++) bookkeeping_v[i] = -1;
-  for (int i = 0; i < N_MOVIES; i++) bookkeeping_u[i] = -1;
+  for (int i = 0; i < N_USERS; i++) bookkeeping_v[i] = 0;
+  for (int i = 0; i < N_MOVIES; i++) bookkeeping_u[i] = 0;
 }
 
 double compute_loss(vector<DataPoint> &p) {
@@ -168,7 +174,7 @@ double compute_loss_regularize(vector<DataPoint> &p) {
     }
   }
 
-  return sqrt(loss/(double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
+  return sqrt(loss/(double)p.size()) + ALPHA * (loss2 + loss3);
 }
 
 double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
@@ -209,7 +215,7 @@ double compute_loss_regularize_for_record_epoch(vector<DataPoint> &p, int epoch)
     }
   }
 
-  return sqrt(loss / (double)p.size()) + ALPHA * (sqrt(loss2) + sqrt(loss3));
+  return sqrt(loss / (double)p.size()) + ALPHA * (loss2 + loss3);
 }
 
 double print_loss_for_records(vector<DataPoint> &p) {
@@ -277,8 +283,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       double v_reg_param = 1, u_reg_param = 1;
       if (REGULARIZE) {
-	double v_diff = update_order - bookkeeping_v[x];
-	double u_diff = update_order - bookkeeping_u[y];
+	double v_diff = update_order - bookkeeping_v[x] - 1;
+	double u_diff = update_order - bookkeeping_u[y] - 1;
 	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
 	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
       }
@@ -397,10 +403,12 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 
       double v_reg_param = 1, u_reg_param = 1;
       if (REGULARIZE) {
-	double v_diff = update_order - bookkeeping_v[x];
-	double u_diff = update_order - bookkeeping_u[y];
-	if (v_diff < 0) v_diff = 0;
-	if (u_diff < 0) u_diff = 0;
+	double v_diff = update_order - bookkeeping_v[x] - 1;
+	double u_diff = update_order - bookkeeping_u[y] - 1;
+	if (CRIMP) {
+	  if (v_diff < 0) v_diff = 0;
+	  if (u_diff < 0) u_diff = 0;
+	}
 	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
 	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
       }
@@ -646,7 +654,7 @@ void cyclades_movielens_completion() {
 
   //Order of the updates
   int *order[NTHREAD];
-  int cur_order = 0;
+  int cur_order = 1;
   for (int i = 0; i < NTHREAD; i++) {
     order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
 					core_to_node[i]);
@@ -663,8 +671,8 @@ void cyclades_movielens_completion() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    //cout << compute_loss_regularize(points) << endl;
     if (REGULARIZE) {
-      //cout << compute_loss_regularize(points) << endl;
       clear_bookkeeping();
     }
     vector<thread> threads;
@@ -746,7 +754,7 @@ void cyclades_movielens_completion_mod_rep() {
 
   //Order of the updates
   int *order[NTHREAD];
-  int cur_order = 0;
+  int cur_order = 1;
   for (int i = 0; i < NTHREAD; i++) {
     order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
 					core_to_node[i]);
@@ -829,7 +837,7 @@ void hogwild_completion() {
 
   //Order of the updates
   int *order[NTHREAD];
-  int cur_order = 0;
+  int cur_order = 1;
   for (int i = 0; i < NTHREAD; i++) {
     order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);	
   }
@@ -845,8 +853,8 @@ void hogwild_completion() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    //cout << compute_loss_regularize(points) << endl;
     if (REGULARIZE) {
-      //cout << compute_loss_regularize(points) << endl;
       clear_bookkeeping();
     }
     vector<thread> threads;
