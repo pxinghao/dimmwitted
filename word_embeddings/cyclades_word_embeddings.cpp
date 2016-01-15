@@ -13,9 +13,9 @@
 #include <numa.h>
 #include <sched.h>
 
-#define WORD_EMBEDDINGS_FILE "corpus"
-#define N_NODES 110594 + 1 
-#define N_DATAPOINTS 514483
+#define WORD_EMBEDDINGS_FILE "sparse_graph"
+#define N_NODES 213271
+#define N_DATAPOINTS 20207156
 
 #define NTHREAD 8
 #define N_EPOCHS 100000
@@ -42,7 +42,8 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-12;
+double C = 0;
+double GAMMA = 5e-10;
 double GAMMA_REDUCTION = .99;
 
 int volatile thread_batch_on[NTHREAD];
@@ -93,13 +94,11 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += abs(model[u][j] - model[v][j]);
-      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
+      sub_loss += (model[u][j]+model[v][j]) *  (model[u][j]+model[v][j]);
     }
-    loss += sub_loss * w;
+    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
   }
-  return loss;
-  //return loss / (double)points.size();
+  return loss / points.size();
 }
 
 double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
@@ -109,9 +108,9 @@ double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += abs(model_records[epoch][u][j] - model_records[epoch][v][j]);
+      sub_loss += (model_records[epoch][u][j]+model_records[epoch][v][j]) *  (model_records[epoch][u][j]+model_records[epoch][v][j]);
     }
-    loss += sub_loss * w;
+    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
   }
   return loss / (double)points.size();
 }
@@ -167,25 +166,29 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 
+      //Get gradient multiplies
+      double l2norm_sqr = 0;
+      for (int j = 0; j < K; j++) {
+	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
+      }
+      double mult = 2 * r * (log(r) - l2norm_sqr - C);      
+
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	//double gradient = 2 * (model[x][j] - model[y][j]) * r;
-	double gradient;
-	if (model[x][j] - model[y][j] < 0) gradient = -r;
-	else gradient = r;
+	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
 	
 	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
 	
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]);
+	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]);
 	
 	//model[x][j] -= GAMMA * gradient;
-	//model[y][j] += GAMMA * gradient;
+	//model[y][j] -= GAMMA * gradient;
 
 	avg_gradients[x][j] += gradient / (double)(N_DATAPOINTS);
-	avg_gradients[y][j] += gradient * -1 / (double)(N_DATAPOINTS);
-	prev_gradients[y][j] = gradient * -1;
+	avg_gradients[y][j] += gradient / (double)(N_DATAPOINTS);
+	prev_gradients[y][j] = gradient;
 	prev_gradients[x][j] = gradient;
       }
       //Update bookkeeping
@@ -268,6 +271,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
+
   
   //Allocate memory
   int index_count[NTHREAD];
@@ -371,23 +375,12 @@ vector<DataPoint> get_word_embeddings_data() {
   vector<DataPoint> datapoints;
   ifstream in(WORD_EMBEDDINGS_FILE);
   string s;
-  int n_terminal_nodes_so_far = 0;
-  int max_node = 0;
   while (getline(in, s)) {
     stringstream linestream(s);
-    char command_type;
-    linestream >> command_type;
-    if (command_type == 'a') {
-      int n1, n2;
-      double cap;
-      linestream >> n1 >> n2 >> cap;
-      datapoints.push_back(DataPoint(n1, n2, cap));
-      max_node = max(max_node, max(n1, n2));
-    }
-    if (command_type == 'n') {
-      int terminal_node_num;
-      linestream >> terminal_node_num;
-    }
+    int n1, n2;
+    double occ;
+    linestream >> n1 >> n2 >> occ;
+    datapoints.push_back(DataPoint(n1, n2, occ));
   }
   return datapoints;
 }
@@ -395,7 +388,7 @@ vector<DataPoint> get_word_embeddings_data() {
 void initialize_model() {
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
-      model[i][j] = 0;
+      model[i][j] = rand() / (double)RAND_MAX;
     }
   }
 }
