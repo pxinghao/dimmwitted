@@ -22,7 +22,7 @@
 #define N_DATAPOINTS 514483 //tsukuba dataset
 
 #define NTHREAD 8
-#define N_EPOCHS 50000
+#define N_EPOCHS 100000
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
 
@@ -46,8 +46,8 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-5;
-double GAMMA_REDUCTION = 1;
+double GAMMA = 5e-12;
+double GAMMA_REDUCTION = .99;
 
 int volatile thread_batch_on[NTHREAD];
 
@@ -83,8 +83,12 @@ void pin_to_core(size_t core) {
 }
 
 void clear_bookkeeping() {
-  for (int i = 0; i < N_NODES; i++) 
+  for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
+    for (int j = 0; j < K; j++) {
+      avg_gradients[i][j] = prev_gradients[i][j] = 0;
+    }
+  }
 }
 
 double compute_loss(vector<DataPoint> points) {
@@ -95,10 +99,12 @@ double compute_loss(vector<DataPoint> points) {
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
       sub_loss += abs(model[u][j] - model[v][j]);
+      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
     }
     loss += sub_loss * w;
   }
-  return loss / (double)points.size();
+  return loss;
+  //return loss / (double)points.size();
 }
 
 double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
@@ -183,11 +189,13 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double r = get<2>(p);
       int update_order = order[batch_index_start[batch]+i];
       int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
+      should_update_x = should_update_y = 1;
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
+	//double gradient = 2 * (model[x][j] - model[y][j]) * r;
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
@@ -196,13 +204,13 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 	
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;    
 	
-	/*model[x][j] -= GAMMA * gradient * should_update_x;
-	  model[y][j] += GAMMA * gradient * should_update_y;*/
+	//model[x][j] -= GAMMA * gradient;
+	//model[y][j] += GAMMA * gradient;
 
-	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
-	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
+	avg_gradients[x][j] += gradient / (double)(N_DATAPOINTS);
+	avg_gradients[y][j] += gradient * -1 / (double)(N_DATAPOINTS);
 	prev_gradients[y][j] = gradient * -1;
 	prev_gradients[x][j] = gradient;
       }
@@ -212,8 +220,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Projections
       if (K == 2) {
-	project_constraint_2((double *)&model[x]);
-	project_constraint_2((double *)&model[y]);
+	//project_constraint_2((double *)&model[x]);
+	//project_constraint_2((double *)&model[y]);
       }
     }
   }
@@ -235,6 +243,8 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
+      if (diff_x < 1) diff_x = 1;
+      if (diff_y < 1) diff_y = 1;
 
       //if (diff_x < 1) diff_x = 1;
       //if (diff_y < 1) diff_y = 1;
@@ -246,17 +256,14 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 
-	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
+	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
 	
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;      */
-	
-	model[x][j] -= GAMMA * gradient * should_update_x;
-	model[y][j] += GAMMA * gradient * should_update_y;
+	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;
 
-	avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / (double)(N_DATAPOINTS);	  
-	avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]) / (double)(N_DATAPOINTS);
+	avg_gradients[x][j] += (gradient) / (double)(N_DATAPOINTS);	  
+	avg_gradients[y][j] += (gradient * -1) / (double)(N_DATAPOINTS);
 	prev_gradients[y][j] = gradient * -1;
 	prev_gradients[x][j] = gradient;
       }
@@ -428,11 +435,11 @@ vector<DataPoint> get_graph_cuts_data() {
 void initialize_model() {
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
-      model[i][j] = 0;
+      model[i][j] = ((double) rand() / (RAND_MAX)) / (double)1000000;
     }
   }
   for (int i = 0; i < K; i++) {
-    model[terminal_nodes[i]][i] = 1;
+    model[terminal_nodes[i]][i] = 0;
   }
 }
 
@@ -497,8 +504,8 @@ void cyc_graph_cuts() {
 
   //Perform cyclades
   Timer gradient_time;
-
   for (int i = 0; i < N_EPOCHS; i++) {
+    cout << i << " " << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -517,7 +524,6 @@ void cyc_graph_cuts() {
     }
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
-    cout << compute_loss(points) << endl;
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -577,6 +583,7 @@ void hog_graph_cuts() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
+    cout << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -592,7 +599,6 @@ void hog_graph_cuts() {
     }
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
-    cout << compute_loss(points) << endl;
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
