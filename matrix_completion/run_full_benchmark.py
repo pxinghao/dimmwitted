@@ -104,7 +104,69 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
-                                     
+
+    hog_command = [x for x in commands if 'hog' in x][0]
+    for b in batch_size_range:
+        for t in thread_range:
+            for r in rank_range:
+                title = "Gradient_Time_Loss_Ratios_batch=%d_thread=%d_rank=%d" % (b, t, r)
+                plt.figure()
+                plt.title(title, fontsize=12)
+                plt.xlabel("Time")
+                plt.ylabel("Loss(hog)/Loss(cyc)")
+                for s in sync_range:
+                    for c in commands:
+                        if c == hog_command:
+                            continue
+                        hog_times = gradient_time_values[hog_command][epoch_range][b][t][r][s]
+                        cyc_times = gradient_time_values[c][epoch_range][b][t][r][s]
+                        hog_losses = loss_values[hog_command][epoch_range][b][t][r][s]
+                        cyc_losses = loss_values[c][epoch_range][b][t][r][s]
+                        # Compute cyc losses -- the best loss cyc achieved by hog's time
+                        cyc_losses_aligned = []
+                        for i1, t1 in enumerate(hog_times):
+                            best_loss = 1000000000
+                            for i2, t2 in enumerate(cyc_times):
+                                if t2 > t1:
+                                    break
+                                best_loss = min(best_loss, cyc_losses[i2])
+                            cyc_losses_aligned.append(best_loss)
+                        loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
+                        plt.plot(times, loss_ratio, label=c+" sync="+str(s))
+                plt.legend(loc="upper right", fontsize=8)
+                plt.savefig(title + ".png")
+                plt.clf()
+
+    for b in batch_size_range:
+        for t in thread_range:
+            for r in rank_range:
+                title = "Overall_Time_Loss_Ratios_batch=%d_thread=%d_rank=%d" % (b, t, r)
+                plt.figure()
+                plt.title(title, fontsize=12)
+                plt.xlabel("Time")
+                plt.ylabel("Loss(hog)/Loss(cyc)")
+                for s in sync_range:
+                    for c in commands:
+                        if hog_command == c:
+                            continue
+                        hog_times = overall_time_values[hog_command][epoch_range][b][t][r][s]
+                        cyc_times = overall_time_values[c][epoch_range][b][t][r][s]
+                        hog_losses = loss_values[hog_command][epoch_range][b][t][r][s]
+                        cyc_losses = loss_values[c][epoch_range][b][t][r][s]
+                        # Compute cyc losses -- the best loss cyc achieved by hog's time
+                        cyc_losses_aligned = []
+                        for i1, t1 in enumerate(hog_times):
+                            best_loss = 1000000000
+                            for i2, t2 in enumerate(cyc_times):
+                                if t2 > t1:
+                                    break
+                                best_loss = min(best_loss, cyc_losses[i2])
+                            cyc_losses_aligned.append(best_loss)
+                        loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
+                        plt.plot(times, loss_ratio, label=c+" sync="+str(s))
+                plt.legend(loc="upper right", fontsize=8)
+                plt.savefig(title + ".png")
+                plt.clf()
 
 def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, rank_range, 
                     sync_range, commands, average_over_n_rep):
@@ -356,5 +418,5 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_all_graphs(0, [10, 30, 80, 100, 150], [2000], [1, 2, 4, 8, 10, 16, 32], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 
-draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16], [200], [0, 1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
+draw_time_loss_graph(1, 200, [5000], [1, 4, 8, 16], [200], [0, 1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
     
