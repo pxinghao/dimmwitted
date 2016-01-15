@@ -14,11 +14,13 @@
 #include <sched.h>
 
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
-#define N_NODES 213271
-#define N_DATAPOINTS 20207156
+//#define N_NODES 213271
+//#define N_DATAPOINTS 20207156
+#define N_NODES 3509
+#define N_DATAPOINTS 81163
 
 #define NTHREAD 8
-#define N_EPOCHS 100000
+#define N_EPOCHS 10000
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
 
@@ -43,8 +45,8 @@
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 double C = 0;
-double GAMMA = 5e-10;
-double GAMMA_REDUCTION = .99;
+double GAMMA = 1e-5;
+double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
@@ -177,14 +179,14 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       for (int j = 0; j < K; j++) {
 	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
 	
-	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
+	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
 	
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]);
+	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]);*/
 	
-	//model[x][j] -= GAMMA * gradient;
-	//model[y][j] -= GAMMA * gradient;
+	model[x][j] -= GAMMA * gradient;
+	model[y][j] -= GAMMA * gradient;
 
 	avg_gradients[x][j] += gradient / (double)(N_DATAPOINTS);
 	avg_gradients[y][j] += gradient / (double)(N_DATAPOINTS);
@@ -217,27 +219,31 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
       if (diff_x < 1) diff_x = 1;
       if (diff_y < 1) diff_y = 1;
 
-      //if (diff_x < 1) diff_x = 1;
-      //if (diff_y < 1) diff_y = 1;
+      //Get gradient multiplies
+      double l2norm_sqr = 0;
+      for (int j = 0; j < K; j++) {
+	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
+      }
+      double mult = 2 * r * (log(r) - l2norm_sqr - C);      
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	double gradient;
-	if (model[x][j] - model[y][j] < 0) gradient = -r;
-	else gradient = r;
-
-	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
+	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
+	
+	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
 	
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]);
+	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]);*/
+	
+	model[x][j] -= GAMMA * gradient;
+	model[y][j] -= GAMMA * gradient;
 
-	avg_gradients[x][j] += (gradient) / (double)(N_DATAPOINTS);	  
-	avg_gradients[y][j] += (gradient * -1) / (double)(N_DATAPOINTS);
-	prev_gradients[y][j] = gradient * -1;
+	avg_gradients[x][j] += gradient / (double)(N_DATAPOINTS);
+	avg_gradients[y][j] += gradient / (double)(N_DATAPOINTS);
+	prev_gradients[y][j] = gradient;
 	prev_gradients[x][j] = gradient;
       }
-
       //Update bookkeeping
       bookkeeping[x] = update_order;
       bookkeeping[y] = update_order;
@@ -455,7 +461,7 @@ void cyc_word_embeddings() {
   //Perform cyclades
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << i << " " << compute_loss(points) << endl;
+    //cout << i << " " << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -533,7 +539,7 @@ void hog_word_embeddings() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
+    //cout << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
