@@ -46,7 +46,7 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-2;
+double GAMMA = 5e-5;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -183,7 +183,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double r = get<2>(p);
       int update_order = order[batch_index_start[batch]+i];
       int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
-
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 

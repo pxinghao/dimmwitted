@@ -132,7 +132,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 best_loss = min(best_loss, cyc_losses[i2])
                             cyc_losses_aligned.append(best_loss)
                         loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
-                        plt.plot(times, loss_ratio, label=c+" sync="+str(s))
+                        plt.plot(hog_times, loss_ratio, label=c+" sync="+str(s))
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -163,7 +163,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 best_loss = min(best_loss, cyc_losses[i2])
                             cyc_losses_aligned.append(best_loss)
                         loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
-                        plt.plot(times, loss_ratio, label=c+" sync="+str(s))
+                        plt.plot(hog_times, loss_ratio, label=c+" sync="+str(s))
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
