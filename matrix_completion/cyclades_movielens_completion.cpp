@@ -31,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 200
+#define N_EPOCHS 5
 #endif
 
 #ifndef BATCH_SIZE
@@ -43,7 +43,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 200
+#define RLENGTH 1
 #endif
 
 #ifndef SHOULD_SYNC
@@ -887,7 +887,7 @@ void hogwild_completion() {
 }
 
 int main(void) {
-
+  setprecision(15);
   pin_to_core(0);
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;

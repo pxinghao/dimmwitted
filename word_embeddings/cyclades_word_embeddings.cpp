@@ -12,6 +12,7 @@
 #include <set>
 #include <numa.h>
 #include <sched.h>
+#include <iomanip> 
 
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 213271
@@ -20,7 +21,7 @@
 #define N_DATAPOINTS 81163
 
 #define NTHREAD 1
-#define N_EPOCHS 10
+#define N_EPOCHS 100
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
 
@@ -45,8 +46,8 @@
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 double C = 0;
-//double GAMMA = 2e-7;
-double GAMMA = 2e-4;
+double GAMMA = 2.619e-4;
+//double GAMMA = 2e-4;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -54,7 +55,7 @@ int volatile thread_batch_on[NTHREAD];
 double avg_gradients[N_NODES][K], prev_gradients[N_NODES][K];
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
-int bookkeeping[N_NODES];
+int volatile bookkeeping[N_NODES];
 
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 double thread_load_balance[NTHREAD];
@@ -165,39 +166,42 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);
-      int update_order = order[batch_index_start[batch]+i];
-      int diff_x = update_order - bookkeeping[x] - 1;
-      int diff_y = update_order - bookkeeping[y] - 1;
+      int update_order = order[batch_index_start[batch]+i];      
+      double diff_x = update_order - bookkeeping[x] - 1;
+      double diff_y = update_order - bookkeeping[y] - 1;
+      
+      for (int j = 0; j < K; j++) {
+	model[x][j] -=  (double)GAMMA * diff_x * avg_gradients[x][j] / N_DATAPOINTS;
+	model[y][j] -=  (double)GAMMA * diff_y * avg_gradients[y][j] / N_DATAPOINTS;
+      }
 
       //Get gradient multiplies
       double l2norm_sqr = 0;
       for (int j = 0; j < K; j++) {
 	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
       }
-      double mult = 2 * r * (log(r) - l2norm_sqr - C);      
+      double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
-	
-	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
-	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
-	
+	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));       	
 	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j] / N_DATAPOINTS);
 	//model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j] / N_DATAPOINTS);
 	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
 	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
+
+	avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
 	
 	//model[x][j] -= GAMMA * gradient;
 	//model[y][j] -= GAMMA * gradient;
 
-	//avg_gradients[x][j] += (gradient - prev_gradients[x][j]) / N_DATAPOINTS;
-	//avg_gradients[y][j] += (gradient - prev_gradients[y][j]) / N_DATAPOINTS;
-	avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
+	//avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	//avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
 	prev_gradients[y][j] = gradient;
 	prev_gradients[x][j] = gradient;
       }
+
       //Update bookkeeping
       bookkeeping[x] = update_order;
       bookkeeping[y] = update_order;
@@ -238,14 +242,14 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
 	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
 	
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]);
-	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]);*/
+	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
+	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;*/
 	
 	model[x][j] -= GAMMA * gradient;
 	model[y][j] -= GAMMA * gradient;
 
-	avg_gradients[x][j] += gradient / (double)(N_DATAPOINTS);
-	avg_gradients[y][j] += gradient / (double)(N_DATAPOINTS);
+	avg_gradients[x][j] += gradient - prev_gradients[x][j];
+	avg_gradients[y][j] += gradient - prev_gradients[y][j];
 	prev_gradients[y][j] = gradient;
 	prev_gradients[x][j] = gradient;
       }
@@ -283,7 +287,6 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
   }
   avg_cc_size /= (double)ccs.size();
 
-  
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -485,6 +488,31 @@ void cyc_word_embeddings() {
     }
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
+
+
+    //START
+    /*random_shuffle(points.begin(), points.end());
+    for (int ii = 0; ii < NTHREAD; ii++) {
+      thread_load_balance[ii] = 0;
+      cur_datapoints_used[ii] = 0;
+    }
+    for (int ii = 0; ii < n_batches; ii++) {
+      
+      int start = ii * BATCH_SIZE;
+      int end = min((ii+1)*BATCH_SIZE, (int)points.size());
+      
+      ///Compute connected components of data points
+      Timer ttt;
+      map<int, vector<int> > cc = compute_CC(points, start, end);
+      cc_time += ttt.elapsed();
+      //Distribute connected components across threads
+      Timer ttt2;
+      distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points);
+      alloc_time += ttt2.elapsed();
+    }
+    
+  
+    //END*/
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -573,6 +601,8 @@ void hog_word_embeddings() {
 }
 
 int main(void) {
+  std::cout << std::fixed << std::showpoint;
+  std::cout << std::setprecision(15);
   pin_to_core(0);
 
   //Create a map from core/thread -> node
