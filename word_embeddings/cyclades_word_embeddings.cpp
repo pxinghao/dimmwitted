@@ -22,7 +22,7 @@
 #define N_NODES 6073
 #define N_DATAPOINTS 150826
 
-#define NTHREAD 4
+#define NTHREAD 8
 
 #ifndef N_EPOCHS
 #define N_EPOCHS 500
@@ -60,7 +60,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA 1e-11
+#define START_GAMMA 1e-3
 #endif
 
 double C = 0;

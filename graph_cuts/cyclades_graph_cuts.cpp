@@ -21,8 +21,8 @@
 #define N_NODES 110594 + 1 //tsukuba dataset
 #define N_DATAPOINTS 514483 //tsukuba dataset
 
-#define NTHREAD 8
-#define N_EPOCHS 100000
+#define NTHREAD 1
+#define N_EPOCHS 100
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
 
@@ -38,6 +38,9 @@
 #define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
+#if HOG == 1
+#define SHOULD_SYNC 0
+#endif
 #ifndef SHOULD_SYNC
 #define SHOULD_SYNC 1
 #endif
@@ -160,7 +163,7 @@ int is_anchor(int coord) {
   return 0;
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id) {
   pin_to_core(thread_id);
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -192,7 +195,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       should_update_x = should_update_y = 1;
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
-      diff_x = diff_y = 1;
 
       for (int j = 0; j < K; j++) {	
 	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
@@ -201,7 +203,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	//double gradient = 2 * (model[x][j] - model[y][j]) * r;
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
@@ -223,60 +224,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Projections
       if (K == 2) {
-	//project_constraint_2((double *)&model[x]);
-	//project_constraint_2((double *)&model[y]);
-      }
-    }
-  }
-}
-
-void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
-  pin_to_core(thread_id);
-
-  for (int batch = 0; batch < access_length.size(); batch++) {
-    
-    //For every data point in the connected component
-    for (int i = 0; i < access_length[batch]; i++) {
-
-      //Compute gradient
-      DataPoint p = access_pattern[batch_index_start[batch]+i];
-      int x = get<0>(p), y = get<1>(p);
-      int update_order = order[batch_index_start[batch]+i];
-      double r = get<2>(p);            
-
-      int diff_x = update_order - bookkeeping[x] - 1;
-      int diff_y = update_order - bookkeeping[y] - 1;
-      if (diff_x < 1) diff_x = 1;
-      if (diff_y < 1) diff_y = 1;
-
-      //if (diff_x < 1) diff_x = 1;
-      //if (diff_y < 1) diff_y = 1;
-      int should_update_x = !is_anchor(x), should_update_y = !is_anchor(y);
-
-      //Apply gradient update
-      for (int j = 0; j < K; j++) {
-	double gradient;
-	if (model[x][j] - model[y][j] < 0) gradient = -r;
-	else gradient = r;
-
-	model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j] * should_update_x;
-	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j] * should_update_y;
-	
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) * should_update_x;
-	model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) * should_update_y;
-
-	avg_gradients[x][j] += (gradient) / (double)(N_DATAPOINTS);	  
-	avg_gradients[y][j] += (gradient * -1) / (double)(N_DATAPOINTS);
-	prev_gradients[y][j] = gradient * -1;
-	prev_gradients[x][j] = gradient;
-      }
-
-      //Update bookkeeping
-      bookkeeping[x] = update_order;
-      bookkeeping[y] = update_order;
-
-      //Projections
-      if (K == 2) {
 	project_constraint_2((double *)&model[x]);
 	project_constraint_2((double *)&model[y]);
       }
@@ -284,7 +231,8 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
   }
 }
 
-void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points) {
+void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
+  
   int * chosen_threads = (int *)malloc(sizeof(int) * ccs.size());
   int total_size_needed[NTHREAD];
   int count = 0;
@@ -310,7 +258,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
-  
+
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -345,6 +293,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
       }
     }
     cur_datapoints_used[i] += total_size_needed[i];
+    order[i].resize(cur_datapoints_used[i]);
     if (access_pattern[i] == NULL) {
       cout << "OOM" << endl;
       exit(0);
@@ -362,6 +311,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
       access_pattern[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = points[cc[i]];
+      order[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = cc[i]+1;
     }
     index_count[chosen_thread] += cc.size();
   }
@@ -461,10 +411,12 @@ void cyc_graph_cuts() {
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int > > batch_index_start(NTHREAD);
+  vector<vector<int> > order(NTHREAD);
   
   for (int i = 0; i < NTHREAD; i++) {
     access_length[i].resize(n_batches);
     batch_index_start[i].resize(n_batches);
+    order[i].resize(n_batches);
   }
 
   //CC Generation
@@ -483,23 +435,8 @@ void cyc_graph_cuts() {
     cc_time += ttt.elapsed();
     //Distribute connected components across threads
     Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);
+    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
-  }
-
-  //Order of the updates
-  int *order[NTHREAD];
-  int cur_order = 1;
-  for (int i = 0; i < NTHREAD; i++) {
-    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
-					core_to_node[i]);
-  }
-  for (int i = 0; i < n_batches; i++) {
-    for (int j = 0; j < NTHREAD; j++) {
-      for (int k = 0; k < access_length[j][i]; k++) {
-	order[j][batch_index_start[j][i]+k] = cur_order++;
-      }
-    }
   }
  
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
@@ -516,7 +453,7 @@ void cyc_graph_cuts() {
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -549,6 +486,7 @@ void hog_graph_cuts() {
   vector<DataPoint *> access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int> > batch_index_start(NTHREAD);
+  vector<vector<int> > order(NTHREAD);
 
   //Timer t2;
   int n_points_per_thread = points.size() / NTHREAD;
@@ -562,24 +500,12 @@ void hog_graph_cuts() {
 
     batch_index_start[i][0] = 0;
     access_pattern[i] = (DataPoint *)malloc(sizeof(DataPoint) * n_points_per_thread);
+    order[i].resize(n_points_per_thread);
     for (int j = start; j < end; j++) {
       access_pattern[i][j-start] = points[j];
+      order[i][j-start] = j+1;
     }
     access_length[i][0] = n_points_per_thread;
-  }
-
-  //Order of the updates
-  int *order[NTHREAD];
-  int cur_order = 1;
-  for (int i = 0; i < NTHREAD; i++) {
-    order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);			
-  }
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < NTHREAD; j++) {
-      for (int k = 0; k < access_length[j][i]; k++) {
-	order[j][batch_index_start[j][i]+k] = cur_order++;
-      }
-    }
   }
 
   //Divide to threads
@@ -590,11 +516,11 @@ void hog_graph_cuts() {
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
