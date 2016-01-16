@@ -17,13 +17,18 @@
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 213271
 //#define N_DATAPOINTS 20207156
-#define N_NODES 3509
-#define N_DATAPOINTS 81163
+#define N_NODES 3822
+#define N_DATAPOINTS 80821
 
 #define NTHREAD 1
+
+#ifndef N_EPOCHS
 #define N_EPOCHS 100
-//#define BATCH_SIZE 2600000
+#endif 
+
+#ifndef BATCH_SIZE
 #define BATCH_SIZE 20000
+#endif
 
 #ifndef HOG
 #define HOG 0
@@ -34,7 +39,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #ifndef SHOULD_SYNC
@@ -45,9 +50,18 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
+#ifndef SAG
+#define SAG 1
+#endif
+
+#ifndef START_GAMMA 
+#define START_GAMMA 1e-1
+#endif
+
 double C = 0;
-double GAMMA = 2.619e-4;
-//double GAMMA = 2e-4;
+double GAMMA = START_GAMMA;
+//double GAMMA = 1e-1; //SAG
+//double GAMMA = 9e-5; //SGD
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -170,9 +184,11 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double diff_x = update_order - bookkeeping[x] - 1;
       double diff_y = update_order - bookkeeping[y] - 1;
       
-      for (int j = 0; j < K; j++) {
-	model[x][j] -=  (double)GAMMA * diff_x * avg_gradients[x][j] / N_DATAPOINTS;
-	model[y][j] -=  (double)GAMMA * diff_y * avg_gradients[y][j] / N_DATAPOINTS;
+      if (SAG) {
+	for (int j = 0; j < K; j++) {
+	  model[x][j] -=  (double)GAMMA * diff_x * avg_gradients[x][j] / N_DATAPOINTS;
+	  model[y][j] -=  (double)GAMMA * diff_y * avg_gradients[y][j] / N_DATAPOINTS;
+	}
       }
 
       //Get gradient multiplies
@@ -187,19 +203,18 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));       	
 	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j] / N_DATAPOINTS);
 	//model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j] / N_DATAPOINTS);
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
-	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
-
-	avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
-	
-	//model[x][j] -= GAMMA * gradient;
-	//model[y][j] -= GAMMA * gradient;
-
-	//avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	//avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
-	prev_gradients[y][j] = gradient;
-	prev_gradients[x][j] = gradient;
+	if (SAG) {
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
+	  model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
+	  avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	  avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
+	  prev_gradients[y][j] = gradient;
+	  prev_gradients[x][j] = gradient;
+	}
+	else {
+	  model[x][j] -= GAMMA * gradient;
+	  model[y][j] -= GAMMA * gradient;
+	}
       }
 
       //Update bookkeeping
@@ -225,34 +240,40 @@ void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern
 
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
-      //if (diff_x < 1) diff_x = 1;
-      //if (diff_y < 1) diff_y = 1;
+
+      if (SAG) {
+	for (int j = 0; j < K; j++) {
+	  model[x][j] -=  (double)GAMMA * diff_x * avg_gradients[x][j] / N_DATAPOINTS;
+	  model[y][j] -=  (double)GAMMA * diff_y * avg_gradients[y][j] / N_DATAPOINTS;
+	}
+      }
 
       //Get gradient multiplies
       double l2norm_sqr = 0;
       for (int j = 0; j < K; j++) {
 	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
       }
-      double mult = 2 * r * (log(r) - l2norm_sqr - C);      
+      double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
-	
-	/*model[x][j] -=  GAMMA * diff_x * avg_gradients[x][j];
-	model[y][j] -=  GAMMA * diff_y * avg_gradients[y][j];
-	
-	model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
-	model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;*/
-	
-	model[x][j] -= GAMMA * gradient;
-	model[y][j] -= GAMMA * gradient;
-
-	avg_gradients[x][j] += gradient - prev_gradients[x][j];
-	avg_gradients[y][j] += gradient - prev_gradients[y][j];
-	prev_gradients[y][j] = gradient;
-	prev_gradients[x][j] = gradient;
+	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));       	
+	//model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j] / N_DATAPOINTS);
+	//model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j] / N_DATAPOINTS);
+	if (SAG) {
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
+	  model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
+	  avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	  avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
+	  prev_gradients[y][j] = gradient;
+	  prev_gradients[x][j] = gradient;
+	}
+	else {
+	  model[x][j] -= GAMMA * gradient;
+	  model[y][j] -= GAMMA * gradient;
+	}
       }
+
       //Update bookkeeping
       bookkeeping[x] = update_order;
       bookkeeping[y] = update_order;
@@ -469,7 +490,8 @@ void cyc_word_embeddings() {
   //Perform cyclades
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << i << " " << compute_loss(points) << endl;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    //cout << i << " " << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -486,33 +508,33 @@ void cyc_word_embeddings() {
 	thread_batch_on[j] = 0;
       }
     }
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
 
 
     //START
-    /*random_shuffle(points.begin(), points.end());
-    for (int ii = 0; ii < NTHREAD; ii++) {
-      thread_load_balance[ii] = 0;
-      cur_datapoints_used[ii] = 0;
-    }
-    for (int ii = 0; ii < n_batches; ii++) {
-      
-      int start = ii * BATCH_SIZE;
-      int end = min((ii+1)*BATCH_SIZE, (int)points.size());
-      
-      ///Compute connected components of data points
-      Timer ttt;
-      map<int, vector<int> > cc = compute_CC(points, start, end);
-      cc_time += ttt.elapsed();
-      //Distribute connected components across threads
-      Timer ttt2;
-      distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points);
-      alloc_time += ttt2.elapsed();
-    }
-    
-  
-    //END*/
+    /*if (i % 1 == 0) {
+      random_shuffle(points.begin(), points.end());
+      for (int ii = 0; ii < NTHREAD; ii++) {
+	thread_load_balance[ii] = 0;
+	cur_datapoints_used[ii] = 0;
+	}
+	for (int ii = 0; ii < n_batches; ii++) {
+	
+	int start = ii * BATCH_SIZE;
+	int end = min((ii+1)*BATCH_SIZE, (int)points.size());
+	
+	///Compute connected components of data points
+	Timer ttt;
+	map<int, vector<int> > cc = compute_CC(points, start, end);
+	cc_time += ttt.elapsed();
+	//Distribute connected components across threads
+	Timer ttt2;
+	distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points);
+	alloc_time += ttt2.elapsed();
+	}
+	       
+	//END
+	}*/
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -572,7 +594,8 @@ void hog_word_embeddings() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    //cout << compute_loss(points) << endl;
     clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -586,7 +609,6 @@ void hog_word_embeddings() {
 	threads[j].join();
       }
     }
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     GAMMA *= GAMMA_REDUCTION;
   }
 
