@@ -31,7 +31,7 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 80
 #endif
 
 #ifndef BATCH_SIZE
@@ -39,13 +39,16 @@
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 1
 #endif
 
 #ifndef RLENGTH
 #define RLENGTH 1
 #endif
 
+#if HOG == 1
+#define SHOULD_SYNC 0
+#endif
 #ifndef SHOULD_SYNC
 #define SHOULD_SYNC 1
 #endif
@@ -246,7 +249,7 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
   }
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id) {
   pin_to_core(thread_id);
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -376,68 +379,9 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
   }
 }
 
-
-
-void do_cyclades_gradient_descent_with_points_no_sync(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, int *order, int thread_id) {
-  pin_to_core(thread_id);
-  //numa_run_on_node(core_to_node[thread_id]);
-  //Keep track of local model
-
-  for (int batch = 0; batch < access_length.size(); batch++) {
-
-    //For every data point in the connected component
-    for (int i = 0; i < access_length[batch]; i++) {
-      //Compute gradient
-      DataPoint p = access_pattern[batch_index_start[batch]+i];
-      //DataPoint p = access_pattern[i];
-      int x = get<0>(p), y = get<1>(p);
-      int update_order = order[batch_index_start[batch]+i];
-      double r = get<2>(p);            
-      double gradient = 0;
-      
-      for (int j = 0; j < RLENGTH; j++) {
-	gradient += v_model[x][j] * u_model[y][j];
-	//gradient += local_v_model[x][j] * local_u_model[y][j];
-      }
-      gradient -= r + C;
-
-      double v_reg_param = 1, u_reg_param = 1;
-      if (REGULARIZE) {
-	double v_diff = update_order - bookkeeping_v[x] - 1;
-	double u_diff = update_order - bookkeeping_u[y] - 1;
-	if (CRIMP) {
-	  if (v_diff < 0) v_diff = 0;
-	  if (u_diff < 0) u_diff = 0;
-	}
-	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
-	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
-      }
-
-      //Perform updates
-      for (int j = 0; j < RLENGTH; j++) {
-	v_model[x][j] = v_reg_param * v_model[x][j];
-	u_model[y][j] = u_reg_param * u_model[y][j];
-	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
-	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
-	v_model[x][j] = new_v;
-	u_model[y][j] = new_u;
-	//double new_v = local_v_model[x][j] - GAMMA * gradient * local_u_model[y][j];
-	//double new_u = local_u_model[y][j] - GAMMA * gradient * local_v_model[x][j];
-	//local_v_model[x][j] = 24;
-	//local_u_model[y][j] = 50;
-      }
-
-      //Update bookkeeping
-      if (REGULARIZE) {
-	bookkeeping_v[x] = update_order;
-	bookkeeping_u[y] = update_order;
-      }
-    }
-  }
-}
-
-void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points) {
-  int chosen_threads[ccs.size()];
+void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
+  
+  int * chosen_threads = (int *)malloc(sizeof(int) * ccs.size());
   int total_size_needed[NTHREAD];
   int count = 0;
   vector<pair<int, int> > balances;
@@ -462,7 +406,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
-  
+
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -491,11 +435,13 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
 	//access_pattern[i] = new_mem;
 	//access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
 	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
+	//access_pattern[i] = (DataPoint *)realloc(access_pattern[i], new_size);
 
 	cur_bytes_allocated[i] = new_size;
       }
     }
     cur_datapoints_used[i] += total_size_needed[i];
+    order[i].resize(cur_datapoints_used[i]);
     if (access_pattern[i] == NULL) {
       cout << "OOM" << endl;
       exit(0);
@@ -504,9 +450,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
     thread_load_balance[i] += total_size_needed[i];
-    max_load = max(max_load, (int)total_size_needed[i]);
   }
-  load_balance_avg_max += max_load;
+
   //Copy memory over
   count = 0;  
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
@@ -514,9 +459,11 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     int chosen_thread = chosen_threads[count];
     for (int i = 0; i < cc.size(); i++) {
       access_pattern[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = points[cc[i]];
+      order[chosen_thread][index_count[chosen_thread]+batch_index_start[chosen_thread][batchnum] + i] = cc[i]+1;
     }
     index_count[chosen_thread] += cc.size();
   }
+  free(chosen_threads);
 }
 
 int union_find(int a, int *p) {
@@ -622,11 +569,13 @@ void cyclades_movielens_completion() {
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int > > batch_index_start(NTHREAD);
+  vector<vector<int> > order(NTHREAD);
 
   for (int i = 0; i < NTHREAD; i++) {
     //access_pattern[i].resize(n_batches);
     access_length[i].resize(n_batches);
     batch_index_start[i].resize(n_batches);
+    order[i].resize(n_batches);
   }
 
   //CC Generation
@@ -645,27 +594,12 @@ void cyclades_movielens_completion() {
     cc_time += ttt.elapsed();
     //Distribute connected components across threads
     Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);
+    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
   }
 
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
-
-  //Order of the updates
-  int *order[NTHREAD];
-  int cur_order = 1;
-  for (int i = 0; i < NTHREAD; i++) {
-    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
-					core_to_node[i]);
-  }
-  for (int i = 0; i < n_batches; i++) {
-    for (int j = 0; j < NTHREAD; j++) {
-      for (int k = 0; k < access_length[j][i]; k++) {
-	order[j][batch_index_start[j][i]+k] = cur_order++;
-      }
-    }
-  }
 
   //Perform cyclades
   Timer gradient_time;
@@ -681,7 +615,7 @@ void cyclades_movielens_completion() {
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));      
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));      
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -722,11 +656,13 @@ void cyclades_movielens_completion_mod_rep() {
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int > > batch_index_start(NTHREAD);
+  vector<vector<int> > order(NTHREAD);
 
   for (int i = 0; i < NTHREAD; i++) {
     //access_pattern[i].resize(n_batches);
     access_length[i].resize(n_batches);
     batch_index_start[i].resize(n_batches);
+    order[i].resize(n_batches);
   }
 
   //CC Generation
@@ -745,27 +681,12 @@ void cyclades_movielens_completion_mod_rep() {
     cc_time += ttt.elapsed();
     //Distribute connected components across threads
     Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points);
+    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
   }
 
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
-
-  //Order of the updates
-  int *order[NTHREAD];
-  int cur_order = 1;
-  for (int i = 0; i < NTHREAD; i++) {
-    order[i] = (int *)numa_alloc_onnode(sizeof(int) * thread_load_balance[i],
-					core_to_node[i]);
-  }
-  for (int i = 0; i < n_batches; i++) {
-    for (int j = 0; j < NTHREAD; j++) {
-      for (int k = 0; k < access_length[j][i]; k++) {
-	order[j][batch_index_start[j][i]+k] = cur_order++;
-      }
-    }
-  }
 
   //Perform cyclades
   Timer gradient_time;
@@ -816,6 +737,7 @@ void hogwild_completion() {
   vector<DataPoint *> access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int> > batch_index_start(NTHREAD);
+  vector<vector<int> > order(NTHREAD);
 
   //Timer t2;
   int n_points_per_thread = points.size() / NTHREAD;
@@ -829,24 +751,12 @@ void hogwild_completion() {
 
     batch_index_start[i][0] = 0;
     access_pattern[i] = (DataPoint *)malloc(sizeof(DataPoint) * n_points_per_thread);
+    order[i].resize(n_points_per_thread);
     for (int j = start; j < end; j++) {
       access_pattern[i][j-start] = points[j];
+      order[i][j-start] = j+1;
     }
     access_length[i][0] = n_points_per_thread;
-  }
-
-  //Order of the updates
-  int *order[NTHREAD];
-  int cur_order = 1;
-  for (int i = 0; i < NTHREAD; i++) {
-    order[i] = (int *)malloc(sizeof(int) * n_points_per_thread);	
-  }
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < NTHREAD; j++) {
-      for (int k = 0; k < access_length[j][i]; k++) {
-	order[j][batch_index_start[j][i]+k] = cur_order++;
-      }
-    }
   }
 
   //Divide to threads
@@ -859,11 +769,11 @@ void hogwild_completion() {
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points_no_sync(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points_no_sync, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), order[j], j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
