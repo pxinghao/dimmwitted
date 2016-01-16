@@ -17,17 +17,19 @@
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 213271
 //#define N_DATAPOINTS 20207156
-#define N_NODES 3822
-#define N_DATAPOINTS 80821
+//#define N_NODES 3822
+//#define N_DATAPOINTS 80821
+#define N_NODES 6073
+#define N_DATAPOINTS 150826
 
-#define NTHREAD 1
+#define NTHREAD 4
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 500
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 200
+#define BATCH_SIZE 300
 #endif
 
 #ifndef HOG
@@ -50,7 +52,7 @@
 #endif
 
 //k way cuts
-#define K 2
+#define K 30
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 #ifndef SAG
@@ -58,7 +60,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA .1
+#define START_GAMMA 1e-11
 #endif
 
 double C = 0;
@@ -67,10 +69,10 @@ double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double avg_gradients[N_NODES][K], prev_gradients[N_NODES][K];
+double avg_gradients[N_NODES][K_TO_CACHELINE], prev_gradients[N_NODES][K_TO_CACHELINE];
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
-int volatile bookkeeping[N_NODES];
+int bookkeeping[N_NODES];
 
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 double thread_load_balance[NTHREAD];
