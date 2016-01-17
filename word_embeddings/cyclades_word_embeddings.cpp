@@ -64,7 +64,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA .9
+#define START_GAMMA 5e-3
 #endif
 
 double C = 0;
@@ -129,11 +129,11 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      //sub_loss += (model[u][j]+model[v][j]) *  (model[u][j]+model[v][j]);
-      sub_loss += (model[u][j]-model[v][j])* (model[u][j]-model[v][j]);
+      sub_loss += (model[u][j]+model[v][j]) *  (model[u][j]+model[v][j]);
+      //sub_loss += (model[u][j]-model[v][j])* (model[u][j]-model[v][j]);
     }
-    //loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
-    loss += sub_loss;
+    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
+    //loss += sub_loss;
   }
   return loss / points.size();
 }
@@ -145,10 +145,10 @@ double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      //sub_loss += (model_records[epoch][u][j]+model_records[epoch][v][j]) *  (model_records[epoch][u][j]+model_records[epoch][v][j]);
-      sub_loss += (model_records[epoch][u][j]-model_records[epoch][v][j])* (model_records[epoch][u][j]-model_records[epoch][v][j]);
+      sub_loss += (model_records[epoch][u][j]+model_records[epoch][v][j]) *  (model_records[epoch][u][j]+model_records[epoch][v][j]);
+      //sub_loss += (model_records[epoch][u][j]-model_records[epoch][v][j])* (model_records[epoch][u][j]-model_records[epoch][v][j]);
     }
-    //loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);    
+    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);    
     loss += sub_loss;
   }
   return loss / (double)points.size();
@@ -222,14 +222,13 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double l2norm_sqr = 0;
       for (int j = 0; j < K; j++) {
 	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
-	//l2norm_sqr += (modx[j]+mody[j]) * (modx[j]+mody[j]) ;
       }
       double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	//double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
-	double gradient = 2 *(model[x][j] - model[y][j]);
+	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
+	//double gradient = 2 *(model[x][j] - model[y][j]);
 
 	if (SAG) {
 	  /*double gradientx = gradient, gradienty = -gradient;
@@ -257,19 +256,19 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	  //prev_gradients[y][j] = gradient;
 	  //prev_gradients[x][j] = gradient;*/
 
-	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
 	  model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
 	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
 	  sum_gradients[y][j] += (gradient - prev_gradients[y][j]);
 	  prev_gradients[y][j] = gradient;
-	  prev_gradients[x][j] = gradient;*/
+	  prev_gradients[x][j] = gradient;
 
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
 	  model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
 	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
 	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
 	  prev_gradients[x][j] = gradient;
-	  prev_gradients[y][j] = gradient * -1;
+	  prev_gradients[y][j] = gradient * -1;*/
 	}
 	else {
 	  model[x][j] -= GAMMA * gradient;
