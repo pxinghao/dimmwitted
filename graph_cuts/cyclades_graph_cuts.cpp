@@ -21,7 +21,7 @@
 #define N_NODES 110594 + 1 //tsukuba dataset
 #define N_DATAPOINTS 514483 //tsukuba dataset
 
-#define NTHREAD 1
+#define NTHREAD 8
 #define N_EPOCHS 100
 //#define BATCH_SIZE 2600000
 #define BATCH_SIZE 20000
@@ -49,7 +49,7 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-12;
+double GAMMA = 5e-13;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -501,7 +501,7 @@ void hog_graph_cuts() {
     batch_index_start[i][0] = 0;
     access_pattern[i] = (DataPoint *)malloc(sizeof(DataPoint) * n_points_per_thread);
     order[i].resize(n_points_per_thread);
-    for (int j = start; j < end; j++) {
+    for (int j = start; j < end; j++) {    
       access_pattern[i][j-start] = points[j];
       order[i][j-start] = j+1;
     }

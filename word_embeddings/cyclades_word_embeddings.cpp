@@ -13,6 +13,7 @@
 #include <numa.h>
 #include <sched.h>
 #include <iomanip> 
+#include <mutex> 
 
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 213271
@@ -22,10 +23,10 @@
 #define N_NODES 6073
 #define N_DATAPOINTS 150826
 
-#define NTHREAD 8
+#define NTHREAD 16
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 500
+#define N_EPOCHS 20
 #endif 
 
 #ifndef BATCH_SIZE
@@ -41,7 +42,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -60,7 +61,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA 1e-3
+#define START_GAMMA 3e-8
 #endif
 
 double C = 0;
@@ -69,10 +70,10 @@ double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double avg_gradients[N_NODES][K_TO_CACHELINE], prev_gradients[N_NODES][K_TO_CACHELINE];
-double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+double volatile avg_gradients[N_NODES][K_TO_CACHELINE], prev_gradients[N_NODES][K_TO_CACHELINE];
+double volatile model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
-int bookkeeping[N_NODES];
+int volatile bookkeeping[N_NODES];
 
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 double thread_load_balance[NTHREAD];
@@ -83,6 +84,8 @@ int core_to_node[NTHREAD];
 int workk[NTHREAD];
 
 using namespace std;
+
+mutex locks[N_NODES];
 typedef tuple<int, int, double> DataPoint;
 
 struct Comp
@@ -115,11 +118,11 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += (model[u][j]+model[v][j]) *  (model[u][j]+model[v][j]);
-      //sub_loss += (model[u][j]-model[v][j])* (model[u][j]-model[v][j]);
+      //sub_loss += (model[u][j]+model[v][j]) *  (model[u][j]+model[v][j]);
+      sub_loss += (model[u][j]-model[v][j])* (model[u][j]-model[v][j]);
     }
-    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
-    //loss += sub_loss;
+    //loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);
+    loss += sub_loss;
   }
   return loss / points.size();
 }
@@ -131,11 +134,11 @@ double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += (model_records[epoch][u][j]+model_records[epoch][v][j]) *  (model_records[epoch][u][j]+model_records[epoch][v][j]);
-      //sub_loss += (model_records[epoch][u][j]-model_records[epoch][v][j])* (model_records[epoch][u][j]-model_records[epoch][v][j]);
+      //sub_loss += (model_records[epoch][u][j]+model_records[epoch][v][j]) *  (model_records[epoch][u][j]+model_records[epoch][v][j]);
+      sub_loss += (model_records[epoch][u][j]-model_records[epoch][v][j])* (model_records[epoch][u][j]-model_records[epoch][v][j]);
     }
-    loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);    
-    //loss += sub_loss;
+    //loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);    
+    loss += sub_loss;
   }
   return loss / (double)points.size();
 }
@@ -194,35 +197,74 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       if (diff_x <= 0) diff_x = 0;
       if (diff_y <= 0) diff_y = 0;
 
+      double modx[K], mody[K];
+
       if (SAG) {
 	for (int j = 0; j < K; j++) {
 	  model[x][j] -=  (double)GAMMA * diff_x * avg_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  (double)GAMMA * diff_y * avg_gradients[y][j] / N_DATAPOINTS;
+	  modx[j] = model[x][j];
+	  mody[j] = model[y][j];
 	}
       }
 
       //Get gradient multiplies
       double l2norm_sqr = 0;
       for (int j = 0; j < K; j++) {
-	l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
+	//l2norm_sqr += (model[x][j] + model[y][j]) * (model[x][j] + model[y][j]);
+	l2norm_sqr += (modx[j]+mody[j]) * (modx[j]+mody[j]) ;
       }
       double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
-	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
-	
+	//double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
+	double gradient = 2 *(model[x][j] - model[y][j]);
+
 	if (SAG) {
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
+	  /*double gradientx = gradient, gradienty = -gradient;
+	  double prev_gradx = prev_gradients[x][j];
+	  double prev_grady = prev_gradients[y][j];
+	  double addx = gradient-prev_gradients[x][j];
+	  double addy = gradient-prev_gradients[y][j];
+	  double avgx = avg_gradients[x][j];
+	  double avgy = avg_gradients[y][j];
+	  double new_avgx = avgx+addx;
+	  double new_avgy = avgy+addy;
+	  double new_modx = modx[j] - GAMMA * (addx+avgx)/N_DATAPOINTS;
+	  double new_mody = mody[j] - GAMMA * (addy+avgy)/N_DATAPOINTS;
+	  
+	  //model[x][j] -= GAMMA * (addx + avgx) / N_DATAPOINTS;
+	  //model[y][j] -= GAMMA * (addy + avgy) / N_DATAPOINTS;
+	  //avg_gradients[x][j] = new_avgx;;
+	  //avg_gradients[y][j] = new_avgy;;
+	  __atomic_compare_exchange(&model[x][j], &modx[j], &new_modx, 0,  __ATOMIC_SEQ_CST,  __ATOMIC_SEQ_CST);
+	  __atomic_compare_exchange(&model[y][j], &mody[j], &new_mody, 0,  __ATOMIC_SEQ_CST,  __ATOMIC_SEQ_CST);
+	  __atomic_compare_exchange(&avg_gradients[x][j], &avgx, &new_avgx, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	  __atomic_compare_exchange(&avg_gradients[y][j], &avgy, &new_avgy, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	  __atomic_compare_exchange(&prev_gradients[x][j], &prev_gradx, &gradientx, 0,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	  __atomic_compare_exchange(&prev_gradients[y][j], &prev_grady, &gradienty, 0,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	  //prev_gradients[y][j] = gradient;
+	  //prev_gradients[x][j] = gradient;*/
+
+	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
 	  model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
 	  avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
 	  avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
 	  prev_gradients[y][j] = gradient;
-	  prev_gradients[x][j] = gradient;
+	  prev_gradients[x][j] = gradient;*/
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
+	  model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
+	  avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	  avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
+	  prev_gradients[y][j] = gradient;
+	  prev_gradients[x][j] = gradient * -1;
 	}
 	else {
+	  //model[x][j] -= GAMMA * gradient;
+	  //model[y][j] -= GAMMA * gradient;
 	  model[x][j] -= GAMMA * gradient;
-	  model[y][j] -= GAMMA * gradient;
+	  model[y][j] -= GAMMA * gradient * -1;
 	}
       }
 
@@ -230,7 +272,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       bookkeeping[x] = update_order;
       bookkeeping[y] = update_order;
     }
-  }
+  }  
 }
 
 void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
@@ -553,8 +595,8 @@ void hog_word_embeddings() {
 }
 
 int main(void) {
-  std::cout << std::fixed << std::showpoint;
-  std::cout << std::setprecision(100);
+  //std::cout << std::fixed << std::showpoint;
+  //std::cout << std::setprecision(100);
   pin_to_core(0);
 
   //Create a map from core/thread -> node
