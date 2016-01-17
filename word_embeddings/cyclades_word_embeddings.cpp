@@ -61,7 +61,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA 3e-8
+#define START_GAMMA 3e-4
 #endif
 
 double C = 0;
@@ -256,9 +256,9 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + avg_gradients[x][j]) / N_DATAPOINTS;
 	  model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + avg_gradients[y][j]) / N_DATAPOINTS;
 	  avg_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	  avg_gradients[y][j] += (gradient - prev_gradients[y][j]);
-	  prev_gradients[y][j] = gradient;
-	  prev_gradients[x][j] = gradient * -1;
+	  avg_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
+	  prev_gradients[x][j] = gradient;
+	  prev_gradients[y][j] = gradient * -1;
 	}
 	else {
 	  //model[x][j] -= GAMMA * gradient;
