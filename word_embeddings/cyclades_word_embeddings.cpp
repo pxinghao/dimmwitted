@@ -23,10 +23,10 @@
 #define N_NODES 6073
 #define N_DATAPOINTS 150826
 
-#define NTHREAD 16
+#define NTHREAD 1
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 200
 #endif 
 
 #ifndef BATCH_SIZE
@@ -42,7 +42,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -61,7 +61,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA 3e-4
+#define START_GAMMA 3e-2
 #endif
 
 double C = 0;
@@ -102,12 +102,20 @@ void pin_to_core(size_t core) {
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
-void clear_bookkeeping() {
+void update_coords(int num_points) {
+  for (int i = 0; i < N_NODES; i++) {
+    double diff = num_points - bookkeeping[i] - 1;
+    for (int j = 0; j < K; j++) {
+      model[i][j] -= GAMMA * diff * avg_gradients[i][j] / N_DATAPOINTS;
+    }
+    bookkeeping[i] = num_points;
+  }
+}
+
+void clear_bookkeeping(int num_points) {
+  update_coords(num_points);
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
-    for (int j = 0; j < K; j++) {
-      avg_gradients[i][j] = prev_gradients[i][j] = 0;
-    }
   }
 }
 
@@ -474,7 +482,6 @@ void cyc_word_embeddings() {
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
-    clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
@@ -490,6 +497,7 @@ void cyc_word_embeddings() {
 	thread_batch_on[j] = 0;
       }
     }
+    clear_bookkeeping(points.size());
     GAMMA *= GAMMA_REDUCTION;
 
 
@@ -568,7 +576,6 @@ void hog_word_embeddings() {
   for (int i = 0; i < N_EPOCHS; i++) {
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     //cout << compute_loss(points) << endl;
-    clear_bookkeeping();
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
@@ -581,6 +588,7 @@ void hog_word_embeddings() {
 	threads[j].join();
       }
     }
+    clear_bookkeeping(points.size());
     GAMMA *= GAMMA_REDUCTION;
   }
 
@@ -598,6 +606,13 @@ int main(void) {
   //std::cout << std::fixed << std::showpoint;
   //std::cout << std::setprecision(100);
   pin_to_core(0);
+
+  for (int i = 0; i < N_NODES; i++) {
+    bookkeeping[i] = 0;
+    for (int j = 0; j < K; j++) {
+      avg_gradients[i][j] = prev_gradients[i][j] = 0;
+    }
+  }
 
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
