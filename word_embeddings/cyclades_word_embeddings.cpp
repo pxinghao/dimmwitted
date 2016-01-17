@@ -44,7 +44,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -650,9 +650,10 @@ int main(void) {
 
   if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     for (int i = 0; i < N_EPOCHS; i++) {
-      model_records[i] = (double **)malloc(sizeof(double **) * N_NODES);
+      model_records[i] = (double **)malloc(sizeof(double *) * N_NODES);
       for (int j = 0; j < N_NODES; j++) {
-	model_records[i][j] = (double *)malloc(sizeof(double *) * K);
+	model_records[i][j] = (double *)malloc(sizeof(double ) * K);
+	
       }
     }
   }

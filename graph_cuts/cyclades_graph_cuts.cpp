@@ -101,8 +101,8 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += abs(model[u][j] - model[v][j]);
-      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
+      //sub_loss += abs(model[u][j] - model[v][j]);
+      sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
     }
     loss += sub_loss * w;
   }
