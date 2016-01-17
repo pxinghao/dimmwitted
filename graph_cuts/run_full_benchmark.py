@@ -127,7 +127,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         else:
                             plt.plot(times, losses, label=c+" sync="+str(s))
                 plt.yscale('log')
-                plt.xscale('log')
+                #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -150,7 +150,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         else:
                             plt.plot(times, losses, label=c+" sync="+str(s))
                 plt.yscale('log')
-                plt.xscale('log')
+                #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -471,6 +471,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 
 #draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
-draw_time_loss_graph(0, 500, [20000], [8], [2], [1], ["cyc_graph_cuts_cyc", "cyc_graph_cuts_hog"])
+draw_time_loss_graph(1, 1000, [20000], [8], [2], [1], ["cyc_graph_cuts_cyc", "cyc_graph_cuts_hog"])
 #draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     

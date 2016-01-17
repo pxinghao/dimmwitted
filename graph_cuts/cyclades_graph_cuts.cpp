@@ -13,22 +13,23 @@
 #include <numa.h>
 #include <sched.h>
 
-//#define GRAPH_CUTS_FILE "liver.n6c10.max"
-//#define N_NODES 4161602 + 1 //liver dataset
-//#define N_DATAPOINTS 25138821 //liver dataset
+#define GRAPH_CUTS_FILE "liver.n6c10.max"
+#define N_NODES 4161602 + 1 //liver dataset
+#define N_DATAPOINTS 25138821 //liver dataset
 
-#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-#define N_NODES 110594 + 1 //tsukuba dataset
-#define N_DATAPOINTS 514483 //tsukuba dataset
+//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+//#define N_NODES 110594 + 1 //tsukuba dataset
+//#define N_DATAPOINTS 514483 //tsukuba dataset
 
 #define NTHREAD 8
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 10
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-#define BATCH_SIZE 12000
+#define BATCH_SIZE 2000000
+//#define BATCH_SIZE 8000
 #endif
 
 #ifndef HOG
@@ -40,7 +41,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -55,14 +56,15 @@
 #define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 1e-3;
+double GAMMA = 5e-5;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double sum_gradients[N_NODES][K], prev_gradients[N_NODES][K];
+double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64))), prev_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
+int *tree;
 int terminal_nodes[K];
 int bookkeeping[N_NODES];
 
@@ -353,10 +355,10 @@ int union_find(int a, int *p) {
 
 map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end) {
   //int tree[end-start + N_NODES];
-  int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));
+  //int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));
 
-  for (long long int i = 0; i < end-start + N_NODES; i++) 
-    tree[i] = i;
+  for (int i = 0; i < end-start + N_NODES; i++) 
+    tree[i] = i;  
 
   for (int i = start; i < end; i++) {
     DataPoint p = points[i];
@@ -374,7 +376,7 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
     int group = union_find(i, tree);
     CCs[group].push_back(i+start);    
   }
-  free(tree);
+  //free(tree);
   return CCs;
  }
 
@@ -457,6 +459,7 @@ void cyc_graph_cuts() {
     distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
   }
+  cout << alloc_time << " " << cc_time << endl;
  
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
@@ -567,6 +570,7 @@ int main(void) {
       sum_gradients[i][j] = prev_gradients[i][j] = 0;
     }
   }
+  tree = (int *)malloc(sizeof(int) * (N_NODES + N_DATAPOINTS));
 
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
