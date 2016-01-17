@@ -13,22 +13,24 @@
 #include <numa.h>
 #include <sched.h>
 
-#define GRAPH_CUTS_FILE "liver.n6c10.max"
-#define N_NODES 4161602 + 1 //liver dataset
-#define N_DATAPOINTS 25138821 //liver dataset
+//#define GRAPH_CUTS_FILE "liver.n6c10.max"
+//#define N_NODES 4161602 + 1 //liver dataset
+//#define N_DATAPOINTS 25138821 //liver dataset
 
-//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-//#define N_NODES 110594 + 1 //tsukuba dataset
-//#define N_DATAPOINTS 514483 //tsukuba dataset
+#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+#define N_NODES 110594 + 1 //tsukuba dataset
+#define N_DATAPOINTS 514483 //tsukuba dataset
 
+#ifndef NTHREAD
 #define NTHREAD 8
+#endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 100
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-#define BATCH_SIZE 2000000
+#define BATCH_SIZE 800
 //#define BATCH_SIZE 8000
 #endif
 
@@ -446,7 +448,6 @@ void cyc_graph_cuts() {
   double cc_time = 0, alloc_time = 0;
 
   for (int i = 0; i < n_batches; i++) {
-
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
 
@@ -459,7 +460,7 @@ void cyc_graph_cuts() {
     distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
   }
-  cout << alloc_time << " " << cc_time << endl;
+  //cout << alloc_time << " " << cc_time << endl;
  
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();

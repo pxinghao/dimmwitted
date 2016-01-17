@@ -26,3 +26,10 @@ cyc_graph_cuts_cyc:
 	rm -rf graph_cuts_cyc
 	g++ -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -DCYC=1 -o graph_cuts_cyc
 	./graph_cuts_cyc
+
+cyc_graph_cuts_cyc_batch_tune:
+	@for number in 300 350 400 450 500 550 600 650 700 750 800 850 900 950 1000; do \
+		echo Batch Size = $$number ; \
+		g++ -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -DCYC=1 -DBATCH_SIZE=$$number -o graph_cuts_cyc; \
+		./graph_cuts_cyc; \
+	done
