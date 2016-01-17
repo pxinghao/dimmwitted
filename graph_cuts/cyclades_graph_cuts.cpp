@@ -24,11 +24,11 @@
 #define NTHREAD 8
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 1000
+#define N_EPOCHS 100
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-#define BATCH_SIZE 20000
+#define BATCH_SIZE 12000
 #endif
 
 #ifndef HOG
@@ -40,7 +40,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -131,6 +131,7 @@ double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
       sub_loss += abs(model_records[epoch][u][j] - model_records[epoch][v][j]);
+      //sub_loss += pow(model_records[epoch][u][j] - model_records[epoch][v][j], 2);
     }
     loss += sub_loss * w;
   }
@@ -208,6 +209,9 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 
+      if (diff_x <= 0) diff_x = 0;
+      if (diff_y <= 0) diff_y = 0;
+
       for (int j = 0; j < K; j++) {	
 	model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
@@ -218,13 +222,16 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
+	//gradient = 2 * r * (model[x][j] - model[y][j]);
 	
 	if (should_update_x) {
+	  //model[x][j] -= GAMMA * gradient;
 	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
 	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
 	  prev_gradients[x][j] = gradient;
 	}
 	if (should_update_y) {
+	  //model[y][j] -= GAMMA * gradient * -1;
 	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
 	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
 	  prev_gradients[y][j] = gradient * -1;
@@ -236,8 +243,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Projections
       if (K == 2) {
-	//project_constraint_2((double *)&model[x]);
-	//project_constraint_2((double *)&model[y]);
+	project_constraint_2((double *)&model[x]);
+	project_constraint_2((double *)&model[y]);
       }
     }
   }
@@ -400,11 +407,11 @@ vector<DataPoint> get_graph_cuts_data() {
 void initialize_model() {
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
-      model[i][j] = ((double) rand() / (RAND_MAX) * 100);
+      model[i][j] = 0;
     }
   }
   for (int i = 0; i < K; i++) {
-    model[terminal_nodes[i]][i] = 0;
+    model[terminal_nodes[i]][i] = 1;
   }
 }
 
@@ -457,6 +464,7 @@ void cyc_graph_cuts() {
   //Perform cyclades
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     //cout << i << " " << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -473,7 +481,6 @@ void cyc_graph_cuts() {
 	thread_batch_on[j] = 0;
       }
     }
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     clear_bookkeeping(points.size());
     GAMMA *= GAMMA_REDUCTION;
   }
@@ -524,7 +531,7 @@ void hog_graph_cuts() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
@@ -537,7 +544,6 @@ void hog_graph_cuts() {
 	threads[j].join();
       }
     }
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
     clear_bookkeeping(points.size());
     GAMMA *= GAMMA_REDUCTION;
   }
