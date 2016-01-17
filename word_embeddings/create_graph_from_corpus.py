@@ -5,7 +5,7 @@ DISTANCE = 10
 
 with open(sys.argv[1], 'r') as corpus:
     text = corpus.read()
-    text = text[100000:100000*3]
+    text = text[100000*3:100000*10]
     #text = text[100000:]
     words_list = [x for x in set(text.split())]
     word_to_id = {}

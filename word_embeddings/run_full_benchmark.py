@@ -155,7 +155,12 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.savefig(title + ".png")
                 plt.clf()
 
-    hog_command = [x for x in commands if 'hog' in x][0]
+    
+    hog_command = [x for x in commands if 'hog' in x]
+    if len(hog_command) != 0:
+        hog_command = hog_command[0]
+    else:
+        return
     for b in batch_size_range:
         for t in thread_range:
             for r in rank_range:
@@ -465,6 +470,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 plt.clf()                                                            
 
 
-
-draw_epoch_loss_graph(0, 100, [20000], [1], [2], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_cyc_sgd"], [1e-1, 9e-5])
+#draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
+draw_time_loss_graph(0, 200, [300], [8], [30], [1], ["cyc_word_embeddings_cyc"])
+#draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     
