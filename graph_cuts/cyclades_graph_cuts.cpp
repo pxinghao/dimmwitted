@@ -12,14 +12,19 @@
 #include <set>
 #include <numa.h>
 #include <sched.h>
+#include <omp.h>
 
-//#define GRAPH_CUTS_FILE "liver.n6c10.max"
-//#define N_NODES 4161602 + 1 //liver dataset
-//#define N_DATAPOINTS 25138821 //liver dataset
+#define GRAPH_CUTS_FILE "liver.n6c10.max"
+#define N_NODES 4161602 + 1 //liver dataset
+#define N_DATAPOINTS 25138821 //liver dataset
 
-#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-#define N_NODES 110594 + 1 //tsukuba dataset
-#define N_DATAPOINTS 514483 //tsukuba dataset
+//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+//#define N_NODES 110594 + 1 //tsukuba dataset
+//#define N_DATAPOINTS 514483 //tsukuba dataset
+
+#ifndef PARALLEL_CC
+#define PARALLEL_CC 1
+#endif
 
 #ifndef NTHREAD
 #define NTHREAD 8
@@ -30,7 +35,7 @@
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-#define BATCH_SIZE 800
+#define BATCH_SIZE 2500000
 //#define BATCH_SIZE 8000
 #endif
 
@@ -55,10 +60,12 @@
 #endif
 
 //k way cuts
+#ifndef K
 #define K 2
+#endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-5;
+double GAMMA = 5e-6;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -66,7 +73,7 @@ int volatile thread_batch_on[NTHREAD];
 double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64))), prev_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
-int *tree;
+int *thread_tree[NTHREAD];
 int terminal_nodes[K];
 int bookkeeping[N_NODES];
 
@@ -166,12 +173,32 @@ void project_constraint_2(double *vec) {
   double sorted[2] = {max(vec[0], vec[1]), min(vec[0], vec[1])};
   double sums[2] = {sorted[0], sorted[0]+sorted[1]};
   double first = sorted[0] - (sums[0] - 1);
-  double second = sorted[1] - .5 * (sums[1] - 1);
-  if (first <= 0 && second <= 0) cout << "WTF" << endl;
+  double second = sorted[1] - (double).5 * (sums[1] - 1);
   int p = (second > 0) ? 2 : 1;
   double theta = 1 / (double)p * (sums[p-1] - 1);
   vec[0] = max((double)0, vec[0]-theta);
   vec[1] = max((double)0, vec[1]-theta);
+}
+
+void project_constraint(double *vec) {
+
+  vector<double> sorted(vec, vec+K);
+  sort(sorted.begin(), sorted.end(), std::greater<double>());
+  //double *sorted = vec;
+  
+  double sum = 0, chosen_sum = 0;
+  int p = 0;
+  for (int i = 0; i < K; i++) {
+    sum += sorted[i];
+    if (sorted[i] - (1 / (double)(i+1)) * (sum - 1) > 0) {
+      p = i+1;
+      chosen_sum = sum;
+    }
+  }
+  double theta = (1 / (double)p) * (chosen_sum - 1);
+  for (int i = 0; i < K; i++) {
+    vec[i] = max((double)0, (double)vec[i]-(double)theta);
+  }
 }
 
 int is_anchor(int coord) {
@@ -215,7 +242,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       if (diff_x <= 0) diff_x = 0;
       if (diff_y <= 0) diff_y = 0;
-
+      
       for (int j = 0; j < K; j++) {	
 	model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
@@ -228,17 +255,17 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	else gradient = r;
 	//gradient = 2 * r * (model[x][j] - model[y][j]);
 	
-	if (should_update_x) {
-	  //model[x][j] -= GAMMA * gradient;
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	  prev_gradients[x][j] = gradient;
-	}
 	if (should_update_y) {
 	  //model[y][j] -= GAMMA * gradient * -1;
 	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
 	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
 	  prev_gradients[y][j] = gradient * -1;
+	}
+	if (should_update_x) {
+	  //model[x][j] -= GAMMA * gradient;
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
+	  prev_gradients[x][j] = gradient;
 	}
       }
       //Update bookkeeping
@@ -246,9 +273,11 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       bookkeeping[y] = update_order;
 
       //Projections
-      if (K == 2) {
-	project_constraint_2((double *)&model[x]);
-	project_constraint_2((double *)&model[y]);
+      if (should_update_x) {
+	project_constraint((double *)&model[x]);
+      }
+      if (should_update_y) {
+	project_constraint((double *)&model[y]);
       }
     }
   }
@@ -257,6 +286,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
   
   int * chosen_threads = (int *)malloc(sizeof(int) * ccs.size());
+  if (!chosen_threads) cout << "OOM" << endl;
   int total_size_needed[NTHREAD];
   int count = 0;
   vector<pair<int, int> > balances;
@@ -303,21 +333,13 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
 	size_t new_size = (size_t)((cur_datapoints_used[i] + total_size_needed[i]) * sizeof(DataPoint));
 	//Round new size to next page length 
 	new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
-	
-	//DataPoint *new_mem = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
-	//memcpy(new_mem, access_pattern[i], old_size);
-	//numa_free(access_pattern[i], old_size);
-	//access_pattern[i] = new_mem;
-	//access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
 	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
-	//access_pattern[i] = (DataPoint *)realloc(access_pattern[i], new_size);
-
 	cur_bytes_allocated[i] = new_size;
       }
     }
     cur_datapoints_used[i] += total_size_needed[i];
     order[i].resize(cur_datapoints_used[i]);
-    if (access_pattern[i] == NULL) {
+    if (!access_pattern[i]) {
       cout << "OOM" << endl;
       exit(0);
     }
@@ -356,8 +378,9 @@ int union_find(int a, int *p) {
 }
 
 map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end) {
-  //int tree[end-start + N_NODES];
   //int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));
+  int tree[end-start + N_NODES];
+//int *tree = thread_tree[0];
 
   for (int i = 0; i < end-start + N_NODES; i++) 
     tree[i] = i;  
@@ -382,11 +405,38 @@ map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end)
   return CCs;
  }
 
+void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, int start, int end, int thread_id) {
+  //int tree[end-start + N_NODES];
+  //int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));
+  pin_to_core(thread_id); 
+  int *tree = thread_tree[thread_id];
+
+  for (int i = 0; i < end-start + N_NODES; i++) 
+    tree[i] = i;  
+
+  for (int i = start; i < end; i++) {
+    DataPoint p = points[i];
+    int src = i-start;
+    int e1 = get<0>(p) + end-start;
+    int e2 = get<1>(p) + end-start;
+    int c1 = union_find(src, tree);
+    int c2 = union_find(e1, tree);
+    int c3 = union_find(e2, tree);
+    tree[c3] = c1;
+    tree[c2] = c1;
+  }
+  for (int i = 0; i < end-start; i++) {
+    int group = union_find(i, tree);
+    CCs[group].push_back(i+start);    
+  }
+  //free(tree);
+ }
+
+
 vector<DataPoint> get_graph_cuts_data() {
   vector<DataPoint> datapoints;
   ifstream in(GRAPH_CUTS_FILE);
   string s;
-  int n_terminal_nodes_so_far = 0;
   int max_node = 0;
   while (getline(in, s)) {
     stringstream linestream(s);
@@ -399,11 +449,6 @@ vector<DataPoint> get_graph_cuts_data() {
       datapoints.push_back(DataPoint(n1, n2, cap));
       max_node = max(max_node, max(n1, n2));
     }
-    if (command_type == 'n') {
-      int terminal_node_num;
-      linestream >> terminal_node_num;
-      terminal_nodes[n_terminal_nodes_so_far++] = terminal_node_num;
-    }
   }
   return datapoints;
 }
@@ -413,6 +458,9 @@ void initialize_model() {
     for (int j = 0; j < K; j++) {
       model[i][j] = 0;
     }
+  }
+  for (int i = 0; i < K; i++) {
+    terminal_nodes[i] = i+1;
   }
   for (int i = 0; i < K; i++) {
     model[terminal_nodes[i]][i] = 1;
@@ -445,22 +493,28 @@ void cyc_graph_cuts() {
   //CC Generation
   Timer t2;
   vector<thread> ts;
-  double cc_time = 0, alloc_time = 0;
 
-  for (int i = 0; i < n_batches; i++) {
-    int start = i * BATCH_SIZE;
-    int end = min((i+1)*BATCH_SIZE, (int)points.size());
-
-    ///Compute connected components of data points
-    Timer ttt;
-    map<int, vector<int> > cc = compute_CC(points, start, end);
-    cc_time += ttt.elapsed();
-    //Distribute connected components across threads
-    Timer ttt2;
-    distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
-    alloc_time += ttt2.elapsed();
+  if (PARALLEL_CC) {
+    omp_set_num_threads(NTHREAD);
+    map<int, vector<int> > CCs[n_batches];
+#pragma omp parallel for
+    for (int i = 0; i < n_batches; i++) {
+      int start = i * BATCH_SIZE;
+      int end = min((i+1)*BATCH_SIZE, (int)points.size());
+      compute_CC_thread(CCs[i], points, start, end, omp_get_thread_num());
+    }
+    for (int i = 0; i < n_batches; i++) {
+      distribute_ccs(CCs[i], access_pattern, access_length, batch_index_start, i, points, order);
+    }
   }
-  //cout << alloc_time << " " << cc_time << endl;
+  else {
+    for (int i = 0; i < n_batches; i++) {
+      int start = i * BATCH_SIZE;
+      int end = min((i+1)*BATCH_SIZE, (int)points.size());
+      map<int, vector<int> > cc = compute_CC(points, start, end);
+      distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
+    }
+  }
  
   //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
   for (int i = 0; i < ts.size(); i++) ts[i].join();
@@ -563,6 +617,7 @@ void hog_graph_cuts() {
 }
 
 int main(void) {
+  srand(100);
   pin_to_core(0);
 
   for (int i = 0; i < N_NODES; i++) {
@@ -570,8 +625,7 @@ int main(void) {
     for (int j = 0; j < K; j++) {
       sum_gradients[i][j] = prev_gradients[i][j] = 0;
     }
-  }
-  tree = (int *)malloc(sizeof(int) * (N_NODES + N_DATAPOINTS));
+  } 
 
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
@@ -583,6 +637,14 @@ int main(void) {
       if (numa_bitmask_isbitset(bm, j)) {
 	core_to_node[j] = i;
       }
+    }
+  }
+
+  for (int i = 0; i < NTHREAD; i++) {
+    thread_tree[i] = (int *)malloc(sizeof(int) * (N_NODES + BATCH_SIZE));
+    if (!thread_tree[i]) {
+      cout << "MALLOC THREAD TREE OOM" << endl;
+      exit(0);
     }
   }
 
@@ -602,13 +664,12 @@ int main(void) {
 
   if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     for (int i = 0; i < N_EPOCHS; i++) {
-      model_records[i] = (double **)malloc(sizeof(double **) * N_NODES);
+      model_records[i] = (double **)malloc(sizeof(double *) * N_NODES);
       for (int j = 0; j < N_NODES; j++) {
-	model_records[i][j] = (double *)malloc(sizeof(double *) * K);
+	model_records[i][j] = (double *)malloc(sizeof(double) * K);
       }
     }
   }
-
   if (HOG) {
     hog_graph_cuts();
   }
