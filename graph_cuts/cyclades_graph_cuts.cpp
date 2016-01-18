@@ -18,29 +18,25 @@
 //#define N_NODES 4161602 + 1 //liver dataset
 //#define N_DATAPOINTS 25138821 //liver dataset
 
-//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-//#define N_NODES 110594 + 1 //tsukuba dataset
-//#define N_DATAPOINTS 514483 //tsukuba dataset
-
-#define GRAPH_CUTS_FILE "test_case"
-#define N_NODES 10
-#define N_DATAPOINTS 10
+#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+#define N_NODES 110594 + 1 //tsukuba dataset
+#define N_DATAPOINTS 514483 //tsukuba dataset
 
 #ifndef PARALLEL_CC
 #define PARALLEL_CC 1
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 200
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
 //#define BATCH_SIZE 2500000
-#define BATCH_SIZE 1
+#define BATCH_SIZE 8000
 #endif
 
 #ifndef HOG
@@ -253,9 +249,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 
-      if (diff_x <= 0) diff_x = 0;
-      if (diff_y <= 0) diff_y = 0;
-      
       for (int j = 0; j < K; j++) {	
 	  model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;

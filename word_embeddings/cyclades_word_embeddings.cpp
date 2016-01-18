@@ -20,8 +20,8 @@
 //#define N_DATAPOINTS 20207156
 //#define N_NODES 3822
 //#define N_DATAPOINTS 80821
-#define N_NODES 13691
-#define N_DATAPOINTS 456840
+#define N_NODES 70985
+#define N_DATAPOINTS 4268542
 
 #ifndef NTHREAD
 #define NTHREAD 8
@@ -32,7 +32,7 @@
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 300
+#define BATCH_SIZE 880
 #endif
 
 #ifndef HOG
@@ -44,7 +44,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -56,7 +56,7 @@
 #endif
 
 //k way cuts
-#define K 30
+#define K 2
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 #ifndef SAG
@@ -64,7 +64,7 @@
 #endif
 
 #ifndef START_GAMMA 
-#define START_GAMMA 5e-3
+#define START_GAMMA 5e-13
 #endif
 
 double C = 0;
@@ -73,10 +73,11 @@ double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double volatile sum_gradients[N_NODES][K_TO_CACHELINE], prev_gradients[N_NODES][K_TO_CACHELINE];
-double volatile model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+double sum_gradients[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE] __attribute__((aligned(64)));
+double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 double **model_records[N_EPOCHS];
-int volatile bookkeeping[N_NODES];
+int bookkeeping[N_NODES];
 
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
 double thread_load_balance[NTHREAD];
@@ -105,18 +106,17 @@ void pin_to_core(size_t core) {
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
-void update_coords(int num_points) {
+void update_coords() {
   for (int i = 0; i < N_NODES; i++) {
-    double diff = num_points - bookkeeping[i] - 1;
+    double diff = N_DATAPOINTS - bookkeeping[i];
     for (int j = 0; j < K; j++) {
       model[i][j] -= GAMMA * diff * sum_gradients[i][j] / N_DATAPOINTS;
     }
-    bookkeeping[i] = num_points;
   }
 }
 
-void clear_bookkeeping(int num_points) {
-  update_coords(num_points);
+void clear_bookkeeping() {
+  update_coords();
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
   }
@@ -149,7 +149,7 @@ double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
       //sub_loss += (model_records[epoch][u][j]-model_records[epoch][v][j])* (model_records[epoch][u][j]-model_records[epoch][v][j]);
     }
     loss += w * (log(w) - sub_loss - C) * (log(w) - sub_loss - C);    
-    loss += sub_loss;
+    //loss += sub_loss;
   }
   return loss / (double)points.size();
 }
@@ -205,12 +205,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double diff_x = update_order - bookkeeping[x] - 1;
       double diff_y = update_order - bookkeeping[y] - 1;
 
-      //locks[x].lock();
-      //locks[y].lock();
-
-      //if (diff_x <= 0) diff_x = 0;
-      //if (diff_y <= 0) diff_y = 0;
-
       if (SAG) {
 	for (int j = 0; j < K; j++) {
 	  model[x][j] -=  (double)GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
@@ -229,46 +223,14 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       for (int j = 0; j < K; j++) {
 	double gradient = -1 * (mult * 2 * (model[x][j] + model[y][j]));
 	//double gradient = 2 *(model[x][j] - model[y][j]);
-
+	
 	if (SAG) {
-	  /*double gradientx = gradient, gradienty = -gradient;
-	  double prev_gradx = prev_gradients[x][j];
-	  double prev_grady = prev_gradients[y][j];
-	  double addx = gradient-prev_gradients[x][j];
-	  double addy = gradient-prev_gradients[y][j];
-	  double avgx = sum_gradients[x][j];
-	  double avgy = sum_gradients[y][j];
-	  double new_avgx = avgx+addx;
-	  double new_avgy = avgy+addy;
-	  double new_modx = model[x][j] - GAMMA * (addx+avgx)/N_DATAPOINTS;
-	  double new_mody = model[y][j] - GAMMA * (addy+avgy)/N_DATAPOINTS;
-	  
-	  //model[x][j] -= GAMMA * (addx + avgx) / N_DATAPOINTS;
-	  //model[y][j] -= GAMMA * (addy + avgy) / N_DATAPOINTS;
-	  //sum_gradients[x][j] = new_avgx;;
-	  //sum_gradients[y][j] = new_avgy;;
-	  //__atomic_compare_exchange(&model[x][j], &modx[j], &new_modx, 0,  __ATOMIC_SEQ_CST,  __ATOMIC_SEQ_CST);
-	  //__atomic_compare_exchange(&model[y][j], &mody[j], &new_mody, 0,  __ATOMIC_SEQ_CST,  __ATOMIC_SEQ_CST);
-	  //__atomic_compare_exchange(&sum_gradients[x][j], &avgx, &new_avgx, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	  //__atomic_compare_exchange(&sum_gradients[y][j], &avgy, &new_avgy, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	  //__atomic_compare_exchange(&prev_gradients[x][j], &prev_gradx, &gradientx, 0,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	  //__atomic_compare_exchange(&prev_gradients[y][j], &prev_grady, &gradienty, 0,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	  //prev_gradients[y][j] = gradient;
-	  //prev_gradients[x][j] = gradient;*/
-
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  model[y][j] -= GAMMA * (gradient - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	  sum_gradients[y][j] += (gradient - prev_gradients[y][j]);
-	  prev_gradients[y][j] = gradient;
-	  prev_gradients[x][j] = gradient;
-
-	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  model[y][j] -= GAMMA * (gradient * -1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
-	  prev_gradients[x][j] = gradient;
-	  prev_gradients[y][j] = gradient * -1;*/
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[update_order-1][0][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  model[y][j] -= GAMMA * (gradient - prev_gradients[update_order-1][1][j] + sum_gradients[y][j]) / N_DATAPOINTS;
+	  sum_gradients[x][j] += (gradient - prev_gradients[update_order-1][0][j]);
+	  sum_gradients[y][j] += (gradient - prev_gradients[update_order-1][1][j]);
+	  prev_gradients[update_order-1][0][j] = gradient;
+	  prev_gradients[update_order-1][1][j] = gradient;
 	}
 	else {
 	  model[x][j] -= GAMMA * gradient;
@@ -502,7 +464,7 @@ void cyc_word_embeddings() {
 	thread_batch_on[j] = 0;
       }
     }
-    clear_bookkeeping(points.size());
+    clear_bookkeeping();
     GAMMA *= GAMMA_REDUCTION;
 
 
@@ -593,7 +555,7 @@ void hog_word_embeddings() {
 	threads[j].join();
       }
     }
-    clear_bookkeeping(points.size());
+    clear_bookkeeping();
     GAMMA *= GAMMA_REDUCTION;
   }
 
@@ -616,7 +578,7 @@ int main(void) {
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
     for (int j = 0; j < K; j++) {
-      sum_gradients[i][j] = prev_gradients[i][j] = 0;
+      sum_gradients[i][j] = 0;
     }
   }
 
@@ -640,10 +602,10 @@ int main(void) {
     workk[i] = 0;
   }
   
-  for (int i = 0; i < N_NODES; i++) {
+  for (int i = 0; i < N_DATAPOINTS; i++) {
     for (int j = 0; j < K; j++) {
-      sum_gradients[i][j] = 0;
-      prev_gradients[i][j] = 0;
+      prev_gradients[i][0][j] = 
+	prev_gradients[i][1][j] = 0;
     }
   }
 
