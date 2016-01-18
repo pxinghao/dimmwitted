@@ -35,8 +35,8 @@
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-#define BATCH_SIZE 2500000
-//#define BATCH_SIZE 8000
+//#define BATCH_SIZE 2500000
+#define BATCH_SIZE 8000
 #endif
 
 #ifndef HOG
@@ -61,7 +61,7 @@
 
 //k way cuts
 #ifndef K
-#define K 2
+#define K 15
 #endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
@@ -180,11 +180,19 @@ void project_constraint_2(double *vec) {
   vec[1] = max((double)0, vec[1]-theta);
 }
 
+int cmp(const void *a, const void *b) {
+  double first = *(double *)a;
+  double second = *(double *)b;
+  if (first > second) return -1;
+  return 1;
+}
+
 void project_constraint(double *vec) {
 
-  vector<double> sorted(vec, vec+K);
-  sort(sorted.begin(), sorted.end(), std::greater<double>());
-  //double *sorted = vec;
+  double sorted[K];
+  memcpy(sorted, vec, sizeof(double)*K);
+  if (sorted[0] != vec[0] || sorted[1] != vec[1]) cout << " YOMAN " << endl;
+  qsort(sorted, K, sizeof(double), cmp);
   
   double sum = 0, chosen_sum = 0;
   int p = 0;
