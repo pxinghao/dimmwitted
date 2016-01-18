@@ -14,13 +14,13 @@
 #include <sched.h>
 #include <omp.h>
 
-#define GRAPH_CUTS_FILE "liver.n6c10.max"
-#define N_NODES 4161602 + 1 //liver dataset
-#define N_DATAPOINTS 25138821 //liver dataset
+//#define GRAPH_CUTS_FILE "liver.n6c10.max"
+//#define N_NODES 4161602 + 1 //liver dataset
+//#define N_DATAPOINTS 25138821 //liver dataset
 
-//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-//#define N_NODES 110594 + 1 //tsukuba dataset
-//#define N_DATAPOINTS 514483 //tsukuba dataset
+#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+#define N_NODES 110594 + 1 //tsukuba dataset
+#define N_DATAPOINTS 514483 //tsukuba dataset
 
 #ifndef PARALLEL_CC
 #define PARALLEL_CC 1
@@ -65,7 +65,8 @@
 #endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 1e-3;
+//double GAMMA = 5e-8;
+double GAMMA = 5e-4;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -127,8 +128,8 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      sub_loss += abs(model[u][j] - model[v][j]);
-      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
+      //sub_loss += abs(model[u][j] - model[v][j]);
+      sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
     }
     loss += sub_loss * w;
   }
@@ -216,7 +217,7 @@ int is_anchor(int coord) {
   return 0;
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
   pin_to_core(thread_id);
 
   for (int batch = 0; batch < access_length.size(); batch++) {
@@ -252,8 +253,10 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       if (diff_y <= 0) diff_y = 0;
       
       for (int j = 0; j < K; j++) {	
-	model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
-	model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
+	if (epoch != 0) {
+	  model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
+	  model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
+	}
       }
 
       //Apply gradient update
@@ -261,17 +264,19 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
-	//gradient = 2 * r * (model[x][j] - model[y][j]);
+	gradient = 2 * r * (model[x][j] - model[y][j]);
 	
 	if (should_update_y) {
 	  //model[y][j] -= GAMMA * gradient * -1;
-	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
+	  if (epoch != 0)
+	    model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
 	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
 	  prev_gradients[y][j] = gradient * -1;
 	}
 	if (should_update_x) {
 	  //model[x][j] -= GAMMA * gradient;
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  if (epoch != 0) 
+	    model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
 	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
 	  prev_gradients[x][j] = gradient;
 	}
@@ -535,11 +540,11 @@ void cyc_graph_cuts() {
     //cout << i << " " << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -602,11 +607,11 @@ void hog_graph_cuts() {
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();

@@ -33,3 +33,8 @@ cyc_graph_cuts_cyc_batch_tune:
 		g++ -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -DCYC=1 -DBATCH_SIZE=$$number -o graph_cuts_cyc; \
 		./graph_cuts_cyc; \
 	done
+
+cyc_graph_cuts_serial:
+	rm -rf graph_cuts_cyc_serial
+	g++ -Ofast -std=c++11 cyclades_graph_cuts_serial.cpp  -o graph_cuts_cyc_serial
+	./graph_cuts_cyc_serial
