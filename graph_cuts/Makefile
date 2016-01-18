@@ -4,14 +4,14 @@ NTHREAD=8
 SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=0
 
 cyc_graph_cuts_cyc_compile:
-	g++ -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -o graph_cuts_cyc \
+	g++  -fopenmp -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -o graph_cuts_cyc \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(RLENGTH) \
 	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAG=1 
 cyc_graph_cuts_cyc_run:
 	@./graph_cuts_cyc
 
 cyc_graph_cuts_hog_compile:
-	g++ -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -o graph_cuts_hog \
+	g++ -fopenmp -Ofast -std=c++11 cyclades_graph_cuts.cpp -lnuma -lpthread -o graph_cuts_hog \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(RLENGTH) \
 	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAG=1 
 

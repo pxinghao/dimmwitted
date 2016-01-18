@@ -470,6 +470,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 plt.clf()                                                            
 
 #draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
-draw_time_loss_graph(1, 150, [2500000], [8], [2], [1], ["cyc_graph_cuts_cyc", "cyc_graph_cuts_hog"])
+draw_time_loss_graph(0, 100, [8000], [8], [15], [1], ["cyc_graph_cuts_cyc", "cyc_graph_cuts_hog"])
 #draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     

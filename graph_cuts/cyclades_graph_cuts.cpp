@@ -48,7 +48,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -65,13 +65,14 @@
 #endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-double GAMMA = 5e-6;
+double GAMMA = 1e-3;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
 double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64))), prev_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+//double **sum_gradients, **prev_gradients, **model;
 double **model_records[N_EPOCHS];
 int *thread_tree[NTHREAD];
 int terminal_nodes[K];
@@ -191,7 +192,6 @@ void project_constraint(double *vec) {
 
   double sorted[K];
   memcpy(sorted, vec, sizeof(double)*K);
-  if (sorted[0] != vec[0] || sorted[1] != vec[1]) cout << " YOMAN " << endl;
   qsort(sorted, K, sizeof(double), cmp);
   
   double sum = 0, chosen_sum = 0;
@@ -471,7 +471,7 @@ void initialize_model() {
     terminal_nodes[i] = i+1;
   }
   for (int i = 0; i < K; i++) {
-    model[terminal_nodes[i]][i] = 1;
+    model[terminal_nodes[i]-1][i-1] = 1;
   }
 }
 
@@ -530,7 +530,8 @@ void cyc_graph_cuts() {
   //Perform cyclades
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    //if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
     //cout << i << " " << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -557,7 +558,7 @@ void cyc_graph_cuts() {
     cout << compute_loss(points) << endl;
   }
   else {
-    print_loss_for_records(points);
+    //print_loss_for_records(points);
   }
 }
 
@@ -597,7 +598,8 @@ void hog_graph_cuts() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    //if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
@@ -620,20 +622,13 @@ void hog_graph_cuts() {
     cout << compute_loss(points) << endl;
   }
   else {
-    print_loss_for_records(points);
+    //print_loss_for_records(points);
   }
 }
 
 int main(void) {
   srand(100);
   pin_to_core(0);
-
-  for (int i = 0; i < N_NODES; i++) {
-    bookkeeping[i] = 0;
-    for (int j = 0; j < K; j++) {
-      sum_gradients[i][j] = prev_gradients[i][j] = 0;
-    }
-  } 
 
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
@@ -647,6 +642,23 @@ int main(void) {
       }
     }
   }
+
+  /*sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
+  prev_gradients = (double **)malloc(sizeof(double *) * N_NODES);
+  model = (double **)malloc(sizeof(double *) * N_NODES);
+  for (int i = 0; i < N_NODES; i++) {
+    sum_gradients[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
+    prev_gradients[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
+    model[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
+    }*/
+
+
+  for (int i = 0; i < N_NODES; i++) {
+    bookkeeping[i] = 0;
+    for (int j = 0; j < K; j++) {
+      sum_gradients[i][j] = prev_gradients[i][j] = 0;
+    }
+  } 
 
   for (int i = 0; i < NTHREAD; i++) {
     thread_tree[i] = (int *)malloc(sizeof(int) * (N_NODES + BATCH_SIZE));
@@ -663,21 +675,14 @@ int main(void) {
     workk[i] = 0;
   }
   
-  for (int i = 0; i < N_NODES; i++) {
-    for (int j = 0; j < K; j++) {
-      sum_gradients[i][j] = 0;
-      prev_gradients[i][j] = 0;
-    }
-  }
-
-  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+  /*if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     for (int i = 0; i < N_EPOCHS; i++) {
       model_records[i] = (double **)malloc(sizeof(double *) * N_NODES);
       for (int j = 0; j < N_NODES; j++) {
 	model_records[i][j] = (double *)malloc(sizeof(double) * K);
       }
     }
-  }
+    }*/
   if (HOG) {
     hog_graph_cuts();
   }
