@@ -17,15 +17,17 @@
 #include <iostream>
 #define K 2
 
-#define N_EPOCHS 100
-#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-#define N_NODES 110594 + 1 //tsukuba dataset
-#define N_DATAPOINTS 514483 //tsukuba dataset
+#define N_EPOCHS 20
+#define GRAPH_CUTS_FILE "test_case"
+//#define N_NODES 110594 + 1 //tsukuba dataset
+//#define N_DATAPOINTS 514483 //tsukuba dataset
+#define N_NODES 10
+#define N_DATAPOINTS 10
 
-double sum_grad[N_NODES][K], prev_grad[N_NODES][K];
+double sum_grad[N_NODES][K], prev_grad[N_DATAPOINTS][N_NODES][K];
 double model[N_NODES][K] __attribute__((aligned(64)));
 int terminal_nodes[K];
-double GAMMA = 5e-4;
+double GAMMA = 8e-5;
 
 using namespace std;
 
@@ -38,8 +40,8 @@ double compute_loss(vector<DataPoint> points) {
     double w = get<2>(points[i]);
     double sub_loss = 0;
     for (int j = 0; j < K; j++) {
-      //sub_loss += abs(model[u][j] - model[v][j]);
-      sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
+      sub_loss += abs(model[u][j] - model[v][j]);
+      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
     }
     loss += sub_loss * w;
   }
@@ -82,6 +84,13 @@ int is_anchor(int coord) {
 }
 
 void initialize_model() {
+  for (int i = 0; i < N_DATAPOINTS; i++) {
+    for (int j = 0; j < N_NODES; j++) {
+      for (int k = 0; k < K; k++) {
+	prev_grad[i][j][k] = 0;
+      }
+    }
+  }
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
       model[i][j] = 0;
@@ -117,16 +126,18 @@ vector<DataPoint> get_graph_cuts_data() {
 
 int main(void) {
 
+  std::cout << std::fixed << std::showpoint;
+  std::cout << std::setprecision(20);
+
   //Read data and initialize model
   srand(100);
   vector<DataPoint> pts = get_graph_cuts_data();
-  random_shuffle(pts.begin(), pts.end());
+  //random_shuffle(pts.begin(), pts.end());
   initialize_model();
 
   //Epoch loop
   for (int epoch = 0; epoch < N_EPOCHS; epoch++) {
-    cout << "EPOCH: " << epoch << endl;
-    cout << "LOSS: " << compute_loss(pts) << endl;
+    cout << compute_loss(pts) << endl;
     
     //For each sampled datapoint
     for (int pt_index = 0; pt_index < pts.size(); pt_index++) {
@@ -140,18 +151,19 @@ int main(void) {
       //Check if coordinate is anchor
       int is_first_anchor = is_anchor(first_coord);
       int is_second_anchor = is_anchor(second_coord);
+
+      for (int j = 0; j < K; j++) {
+	//cout << prev_grad[pt_index][first_coord][j] << endl;
+	//cout << sum_grad[first_coord][j] << endl;
+	//cout << model[first_coord][j] << endl;
+	//cout << model[second_coord][j] << endl;
+      }
       
       //Compute the gradient at the point
       double first_grad[K], second_grad[K];
       for (int i = 0; i < K; i++) {
-	if (model[first_coord][i] - model[second_coord][i] < 0) {
-	  first_grad[i] = -weight;
-	  second_grad[i] = weight;
-	}
-	else {
-	  first_grad[i] = weight;
-	  second_grad[i] = -weight;
-	}
+	first_grad[i] = (model[first_coord][i] - model[second_coord][i] < 0) ? -weight : weight;
+	second_grad[i] = -first_grad[i];
       }
 
       //Create the gradient matrix
@@ -174,18 +186,26 @@ int main(void) {
 	if (i == first_coord && is_first_anchor) continue;
 	if (i == second_coord && is_second_anchor) continue;
 	for (int j = 0; j < K; j++) {
+	  //model[i][j] -= GAMMA * gradient[i][j];
 	  //Full gradient = (cur_grad - prev_grad + sum_grad) / n
-	  full_gradient[i][j] = (gradient[i][j] - prev_grad[i][j] + sum_grad[i][j]) / N_DATAPOINTS;
+	  full_gradient[i][j] = (gradient[i][j] - prev_grad[pt_index][i][j] + sum_grad[i][j]) / N_DATAPOINTS;
 	  //Update model
 	  model[i][j] -= GAMMA * full_gradient[i][j];
 	  //Update sum
-	  sum_grad[i][j] -= prev_grad[i][j] + gradient[i][j];
+	  sum_grad[i][j] += -prev_grad[pt_index][i][j] + gradient[i][j];
 	  //Update previous gradient
-	  prev_grad[i][j] = gradient[i][j];
+	  prev_grad[pt_index][i][j] = gradient[i][j];
 	}
 	//Project constraints
 	project_constraint((double *)model[i]);
       }
+
+	for (int j = 0; j < K; j++) {
+	  //cout << model[first_coord][j] << endl;
+	  //cout << model[second_coord][j] << endl;
+	  //cout << sum_grad[first_coord][j] << endl;
+	  //cout << prev_grad[pt_index][first_coord][j] << endl;
+	}
     }
   }
 }

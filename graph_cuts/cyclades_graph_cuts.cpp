@@ -18,25 +18,29 @@
 //#define N_NODES 4161602 + 1 //liver dataset
 //#define N_DATAPOINTS 25138821 //liver dataset
 
-#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-#define N_NODES 110594 + 1 //tsukuba dataset
-#define N_DATAPOINTS 514483 //tsukuba dataset
+//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+//#define N_NODES 110594 + 1 //tsukuba dataset
+//#define N_DATAPOINTS 514483 //tsukuba dataset
+
+#define GRAPH_CUTS_FILE "test_case"
+#define N_NODES 10
+#define N_DATAPOINTS 10
 
 #ifndef PARALLEL_CC
 #define PARALLEL_CC 1
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 20
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
 //#define BATCH_SIZE 2500000
-#define BATCH_SIZE 8000
+#define BATCH_SIZE 1
 #endif
 
 #ifndef HOG
@@ -61,17 +65,18 @@
 
 //k way cuts
 #ifndef K
-#define K 15
+#define K 2
 #endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 //double GAMMA = 5e-8;
-double GAMMA = 5e-4;
+double GAMMA = 8e-5;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64))), prev_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
+double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
+double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE]  __attribute__((aligned(64)));
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double **sum_gradients, **prev_gradients, **model;
 double **model_records[N_EPOCHS];
@@ -102,73 +107,6 @@ void pin_to_core(size_t core) {
   CPU_ZERO(&cpuset);
   CPU_SET(core, &cpuset);
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-}
-
-void update_coords(int num_points) {
-  for (int i = 0; i < N_NODES; i++) {
-    double diff = num_points - bookkeeping[i] - 1;
-    for (int j = 0; j < K; j++) {
-      model[i][j] -= GAMMA * diff * sum_gradients[i][j] / N_DATAPOINTS;
-    }
-    bookkeeping[i] = num_points;
-  }
-}
-
-void clear_bookkeeping(int num_points) {
-  update_coords(num_points);
-  for (int i = 0; i < N_NODES; i++) {
-    bookkeeping[i] = 0;
-  }
-}
-
-double compute_loss(vector<DataPoint> points) {
-  double loss = 0;
-  for (int i = 0; i < points.size(); i++) {
-    int u = get<0>(points[i]), v = get<1>(points[i]);
-    double w = get<2>(points[i]);
-    double sub_loss = 0;
-    for (int j = 0; j < K; j++) {
-      //sub_loss += abs(model[u][j] - model[v][j]);
-      sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
-    }
-    loss += sub_loss * w;
-  }
-  return loss / (double)points.size();
-}
-
-double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
-  double loss = 0;
-  for (int i = 0; i < points.size(); i++) {
-    int u = get<0>(points[i]), v = get<1>(points[i]);
-    double w = get<2>(points[i]);
-    double sub_loss = 0;
-    for (int j = 0; j < K; j++) {
-      sub_loss += abs(model_records[epoch][u][j] - model_records[epoch][v][j]);
-      //sub_loss += pow(model_records[epoch][u][j] - model_records[epoch][v][j], 2);
-    }
-    loss += sub_loss * w;
-  }
-  return loss / (double)points.size();
-}
-
-double print_loss_for_records(vector<DataPoint> &p) {
-  for (int i = 0; i < N_EPOCHS; i++) {
-    double loss;
-    loss = compute_loss_for_record_epoch(p, i);
-    double overall_time = overall_times[i];
-    double gradient_time = gradient_times[i];
-    cout << loss << " " << overall_time << " " << gradient_time << endl;
-  }
-}
-
-double copy_model_to_records(int epoch, double overall_time, double gradient_time) {
-  gradient_times[epoch] = gradient_time;
-  overall_times[epoch] = overall_time;
-  for (int i = 0; i < N_NODES; i++) {
-    for (int j = 0; j < K; j++) {
-      model_records[epoch][i][j] = model[i][j];
-    }
-  }
 }
 
 void project_constraint_2(double *vec) {
@@ -207,6 +145,72 @@ void project_constraint(double *vec) {
   double theta = (1 / (double)p) * (chosen_sum - 1);
   for (int i = 0; i < K; i++) {
     vec[i] = max((double)0, (double)vec[i]-(double)theta);
+  }
+}
+
+void update_coords() {
+  for (int i = 0; i < N_NODES; i++) {
+    double diff = N_DATAPOINTS - bookkeeping[i];
+    for (int j = 0; j < K; j++) {
+      model[i][j] -= GAMMA * diff * sum_gradients[i][j] / N_DATAPOINTS;
+    }
+  }
+}
+
+void clear_bookkeeping() {
+  update_coords();
+  for (int i = 0; i < N_NODES; i++) {
+    bookkeeping[i] = 0;
+  }
+}
+
+double compute_loss(vector<DataPoint> points) {
+  double loss = 0;
+  for (int i = 0; i < points.size(); i++) {
+    int u = get<0>(points[i]), v = get<1>(points[i]);
+    double w = get<2>(points[i]);
+    double sub_loss = 0;
+    for (int j = 0; j < K; j++) {
+      sub_loss += abs(model[u][j] - model[v][j]);
+      //sub_loss += (model[u][j]-model[v][j]) *  (model[u][j]-model[v][j]);
+    }
+    loss += sub_loss * w;
+  }
+  return loss / (double)points.size();
+}
+
+double compute_loss_for_record_epoch(vector<DataPoint> &points, int epoch) {
+  double loss = 0;
+  for (int i = 0; i < points.size(); i++) {
+    int u = get<0>(points[i]), v = get<1>(points[i]);
+    double w = get<2>(points[i]);
+    double sub_loss = 0;
+    for (int j = 0; j < K; j++) {
+      sub_loss += abs(model_records[epoch][u][j] - model_records[epoch][v][j]);
+      //sub_loss += pow(model_records[epoch][u][j] - model_records[epoch][v][j], 2);
+    }
+    loss += sub_loss * w;
+  }
+  return loss / (double)points.size();
+}
+
+double print_loss_for_records(vector<DataPoint> &p) {
+  for (int i = 0; i < N_EPOCHS; i++) {
+    double loss;
+    loss = compute_loss_for_record_epoch(p, i);
+    double overall_time = overall_times[i];
+    double gradient_time = gradient_times[i];
+    cout << loss << " " << overall_time << " " << gradient_time << endl;
+  }
+}
+
+double copy_model_to_records(int epoch, double overall_time, double gradient_time) {
+  gradient_times[epoch] = gradient_time;
+  overall_times[epoch] = overall_time;
+  for (int i = 0; i < N_NODES; i++) {
+    for (int j = 0; j < K; j++) {
+      model_records[epoch][i][j] = model[i][j];
+    }
   }
 }
 
@@ -253,32 +257,30 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       if (diff_y <= 0) diff_y = 0;
       
       for (int j = 0; j < K; j++) {	
-	if (epoch != 0) {
 	  model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
-	}
       }
+
+      project_constraint((double *)model[x]);
+      project_constraint((double *)model[y]);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
 	double gradient;
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
-	gradient = 2 * r * (model[x][j] - model[y][j]);
 	
 	if (should_update_y) {
 	  //model[y][j] -= GAMMA * gradient * -1;
-	  if (epoch != 0)
-	    model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[y][j] + sum_gradients[y][j]) / N_DATAPOINTS;
-	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[y][j]);
-	  prev_gradients[y][j] = gradient * -1;
+	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[update_order-1][1][j] + sum_gradients[y][j]) / N_DATAPOINTS;
+	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[update_order-1][1][j]); 
+	  prev_gradients[update_order-1][1][j] = gradient * -1;
 	}
 	if (should_update_x) {
 	  //model[x][j] -= GAMMA * gradient;
-	  if (epoch != 0) 
-	    model[x][j] -= GAMMA * (gradient - prev_gradients[x][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += (gradient - prev_gradients[x][j]);
-	  prev_gradients[x][j] = gradient;
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[update_order-1][0][j] + sum_gradients[x][j]) / N_DATAPOINTS;
+	  sum_gradients[x][j] += (gradient - prev_gradients[update_order-1][0][j]);
+	  prev_gradients[update_order-1][0][j] = gradient;
 	}
       }
       //Update bookkeeping
@@ -286,12 +288,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       bookkeeping[y] = update_order;
 
       //Projections
-      if (should_update_x) {
-	project_constraint((double *)&model[x]);
-      }
-      if (should_update_y) {
-	project_constraint((double *)&model[y]);
-      }
+      project_constraint((double *)&model[x]);
+      project_constraint((double *)&model[y]);
     }
   }
 }
@@ -467,6 +465,14 @@ vector<DataPoint> get_graph_cuts_data() {
 }
 
 void initialize_model() {
+  for (int i = 0; i < N_DATAPOINTS; i++) {
+    for (int j = 0; j < 2; j++) {
+      for (int k = 0; k < K; k++) {
+	prev_gradients[i][j][k] = 0;
+      }
+    }
+  }
+  
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
       model[i][j] = 0;
@@ -484,7 +490,7 @@ void cyc_graph_cuts() {
   vector<DataPoint> points = get_graph_cuts_data();
   initialize_model();
 
-  random_shuffle(points.begin(), points.end());
+  //random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Access pattern generation
@@ -553,7 +559,7 @@ void cyc_graph_cuts() {
 	thread_batch_on[j] = 0;
       }
     }
-    clear_bookkeeping(points.size());
+    clear_bookkeeping();
     GAMMA *= GAMMA_REDUCTION;
   }
 
@@ -617,7 +623,7 @@ void hog_graph_cuts() {
 	threads[j].join();
       }
     }
-    clear_bookkeeping(points.size());
+    clear_bookkeeping();
     GAMMA *= GAMMA_REDUCTION;
   }
 
@@ -632,6 +638,8 @@ void hog_graph_cuts() {
 }
 
 int main(void) {
+  std::cout << std::fixed << std::showpoint;
+  std::cout << std::setprecision(20);
   srand(100);
   pin_to_core(0);
 
@@ -661,7 +669,7 @@ int main(void) {
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
     for (int j = 0; j < K; j++) {
-      sum_gradients[i][j] = prev_gradients[i][j] = 0;
+      sum_gradients[i][j] = 0;
     }
   } 
 
