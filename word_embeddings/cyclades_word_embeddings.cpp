@@ -16,23 +16,23 @@
 #include <mutex> 
 
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
-#define N_NODES 628
-#define N_DATAPOINTS 5607
+//#define N_NODES 628
+//#define N_DATAPOINTS 5607
 //#define N_NODES 3822
 //#define N_DATAPOINTS 80821
-//#define N_NODES 70985
-//#define N_DATAPOINTS 4268542
+#define N_NODES 70985
+#define N_DATAPOINTS 638820
 
 #ifndef NTHREAD
-#define NTHREAD 2
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 1000
+#define N_EPOCHS 100
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 300
+#define BATCH_SIZE 80000
 #endif
 
 #ifndef HOG
@@ -44,7 +44,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -56,7 +56,9 @@
 #endif
 
 //k way cuts
-#define K 200
+#ifndef K
+#define K 30
+#endif
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 #ifndef SAG
@@ -65,6 +67,7 @@
 
 double C = 0;
 double GAMMA = 8e-6;
+//double GAMMA = 8e-4;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -449,10 +452,15 @@ void cyc_word_embeddings() {
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
   //Perform cyclades
+  float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     //cout << compute_loss(points) << endl;
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_timer;
+      copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);
+      copy_time += copy_timer.elapsed();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
@@ -542,10 +550,14 @@ void hog_word_embeddings() {
   }
 
   //Divide to threads
+  float copy_time = 0;
   Timer gradient_time;
-
   for (int i = 0; i < N_EPOCHS; i++) {
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_timer;
+      copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);
+      copy_time += copy_timer.elapsed();
+    }
     //cout << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {

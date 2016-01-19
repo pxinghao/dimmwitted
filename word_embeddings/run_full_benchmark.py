@@ -168,7 +168,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.figure()
                 plt.title(title, fontsize=12)
                 plt.xlabel("Time")
-                plt.ylabel("Loss(hog)/Loss(cyc)")
+                plt.ylabel("hog_loss/cyc_loss")
                 for s in sync_range:
                     for c in commands:
                         if c == hog_command:
@@ -199,7 +199,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.figure()
                 plt.title(title, fontsize=12)
                 plt.xlabel("Time")
-                plt.ylabel("Loss(hog)/Loss(cyc)")
+                plt.ylabel("hog_loss/cyc_loss")
                 for s in sync_range:
                     for c in commands:
                         if hog_command == c:
@@ -471,7 +471,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 
 #draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
-#draw_time_loss_graph(0, 1000, [300], [1, 2, 4, 8], [200], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"])
-draw_time_loss_graph(0, 1000, [300], [1, 2, 4, 8], [200], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
+draw_time_loss_graph(0, 500, [80000], [1, 4, 8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"])
+#draw_time_loss_graph(0, 1000, [300], [1, 8], [200], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
 #draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     
