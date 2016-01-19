@@ -23,20 +23,20 @@
 #define N_DATAPOINTS 514483 //tsukuba dataset
 
 #ifndef PARALLEL_CC
-#define PARALLEL_CC 1
+#define PARALLEL_CC 0
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 200
+#define N_EPOCHS 5
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
 //#define BATCH_SIZE 2500000
-#define BATCH_SIZE 8000
+#define BATCH_SIZE 200
 #endif
 
 #ifndef HOG
@@ -48,7 +48,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -254,8 +254,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	  model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
       }
 
-      project_constraint((double *)model[x]);
-      project_constraint((double *)model[y]);
+      //project_constraint((double *)model[x]);
+      //project_constraint((double *)model[y]);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -281,8 +281,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       bookkeeping[y] = update_order;
 
       //Projections
-      project_constraint((double *)&model[x]);
-      project_constraint((double *)&model[y]);
+      //project_constraint((double *)&model[x]);
+      //project_constraint((double *)&model[y]);
     }
   }
 }

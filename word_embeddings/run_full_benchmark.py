@@ -44,7 +44,7 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
                         for ii, c in enumerate(commands):
                             print("Iteration %d of %d" % (cur_iter, total_iter))
                             cur_iter += 1
-                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "RLENGTH="+str(r), "SHOULD_SYNC="+\
+                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+\
                                                                                     str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1", "START_GAMMA="+str(gammas[ii])])
                             values = [float(x) for x in output]
                             losses = [values[i] for i in range(0, len(values), 3)]
@@ -94,7 +94,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         for c in commands:
                             print("Iteration %d of %d" % (cur_iter, total_iter))
                             cur_iter += 1
-                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "RLENGTH="+str(r), "SHOULD_SYNC="+\
+                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+\
                                                                                     str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
                             values = [float(x) for x in output]
                             losses = [values[i] for i in range(0, len(values), 3)]
@@ -123,11 +123,11 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c, marker='o')
+                                plt.plot(times, losses, label=c)
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s), marker='o')
+                            plt.plot(times, losses, label=c+" sync="+str(s))
                 plt.yscale('log')
-                plt.xscale('log')
+                #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -146,11 +146,11 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c, marker='o')
+                                plt.plot(times, losses, label=c)
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s), marker='o')
+                            plt.plot(times, losses, label=c+" sync="+str(s))
                 plt.yscale('log')
-                plt.xscale('log')
+                #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -244,7 +244,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                                     print("Iteration %d of %d" % (cur_iter, total_iter))
                                     cur_iter += 1
                                     # Run command with all params
-                                    output = run_command_with_params_and_get_output(command, ["N_EPOCHS="+str(epoch), "BATCH_SIZE="+str(batch_size), "NTHREAD="+str(thread), "RLENGTH="+str(rank), "SHOULD_SYNC="+str(sync)])
+                                    output = run_command_with_params_and_get_output(command, ["N_EPOCHS="+str(epoch), "BATCH_SIZE="+str(batch_size), "NTHREAD="+str(thread), "K="+str(rank), "SHOULD_SYNC="+str(sync)])
                             
                                     # overall elapsed, gradient time, loss
                                     overall_time = float(output[0])
@@ -471,6 +471,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 
 #draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
-draw_time_loss_graph(1, 200, [300], [8], [30], [1], ["cyc_word_embeddings_cyc"])
+#draw_time_loss_graph(0, 1000, [300], [1, 2, 4, 8], [200], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"])
+draw_time_loss_graph(0, 1000, [300], [1, 2, 4, 8], [200], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
 #draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     
