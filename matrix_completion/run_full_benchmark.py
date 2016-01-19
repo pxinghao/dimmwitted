@@ -54,9 +54,9 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                             overall_time_values[c][epoch_range][b][t][r][s] = overall_times
                             gradient_time_values[c][epoch_range][b][t][r][s] = gradient_times
     else:
-        with open('objs2.pickle') as f:
+        with open('time_data.pickle') as f:
             loss_values, overall_time_values, gradient_time_values = pickle.load(f)
-    with open('objs2.pickle', "w") as f:
+    with open('time_data.pickle', "w") as f:
         pickle.dump([loss_values, overall_time_values, gradient_time_values], f)
 
     for b in batch_size_range:
@@ -208,10 +208,10 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                                 average_gradient_times[command][epoch][batch_size][thread][rank][sync] = avg_gradient_time
                                 average_total_times[command][epoch][batch_size][thread][rank][sync] = avg_overall_time
     else:
-        with open('objs.pickle') as f:
+        with open('epoch_data.pickle') as f:
             average_losses, average_gradient_times, average_total_times = pickle.load(f)
 
-    with open('objs.pickle', 'w') as f:
+    with open('epochs_data.pickle', 'w') as f:
         pickle.dump([average_losses, average_gradient_times, average_total_times], f)
 
 
@@ -236,8 +236,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             low = min(times)
                             high = max(times)
                             if 'hog' in c:
-                                if s == 0:
-                                    plots[index].plot(epochs, times, label=c)
+                                plots[index].plot(epochs, times, label=c)
                             else:
                                 plots[index].plot(epochs, times, label=c+" sync="+str(s))
                         #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
@@ -266,8 +265,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             low = min(times)
                             high = max(times)
                             if 'hog' in c:
-                                if s == 0:
-                                    plots[index].plot(threads, times, label=c)
+                                plots[index].plot(threads, times, label=c)
                             else:
                                 plots[index].plot(threads, times, label=c+" sync="+str(s))
                         #plots[index].set_ylim([math.ceil(low-0.5*(high-low)), math.ceil(high+0.5*(high-low))])
@@ -418,5 +416,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_all_graphs(0, [10, 30, 80, 100, 150], [2000], [1, 2, 4, 8, 10, 16, 32], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 
-draw_time_loss_graph(1, 200, [5000], [1, 4, 8, 16], [200], [0, 1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
+# W/ regularization
+draw_all_graphs(0, [50, 100, 150, 200], [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"], 2)
+draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
     

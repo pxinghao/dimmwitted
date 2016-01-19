@@ -47,6 +47,7 @@
 #endif
 
 #if HOG == 1
+#undef SHOULD_SYNC
 #define SHOULD_SYNC 0
 #endif
 #ifndef SHOULD_SYNC
@@ -602,6 +603,7 @@ void cyclades_movielens_completion() {
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
   //Perform cyclades
+  float copy_model_time = 0;
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
@@ -625,7 +627,11 @@ void cyclades_movielens_completion() {
       }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_model_timer;
+      copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      copy_model_time += copy_model_timer.elapsed();
+    }
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -760,6 +766,7 @@ void hogwild_completion() {
   }
 
   //Divide to threads
+  float copy_model_time;
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
@@ -780,7 +787,11 @@ void hogwild_completion() {
       }
     }
     GAMMA *= GAMMA_REDUCTION_FACTOR;
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_model_timer;
+      copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      copy_model_time += copy_model_timer.elapsed();
+    }
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
