@@ -14,25 +14,26 @@
 #include <sched.h>
 #include <iomanip> 
 #include <mutex> 
+#include <omp.h>
 
 #define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 628
 //#define N_DATAPOINTS 5607
 //#define N_NODES 3822
 //#define N_DATAPOINTS 80821
-#define N_NODES 70985
-#define N_DATAPOINTS 638820
+#define N_NODES 213271
+#define N_DATAPOINTS 20207156
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 800
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 80000
+#define BATCH_SIZE 4250
 #endif
 
 #ifndef HOG
@@ -66,16 +67,16 @@
 #endif
 
 double C = 0;
-double GAMMA = 8e-6;
+double GAMMA = 8e-9;
 //double GAMMA = 8e-4;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double sum_gradients[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
-double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE] __attribute__((aligned(64)));
-double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
-//double **model, **sum_gradients, ***prev_gradients;
+//double sum_gradients[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+//double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE] __attribute__((aligned(64)));
+//double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
+double **model, **sum_gradients, ***prev_gradients;
 double **model_records[N_EPOCHS];
 int bookkeeping[N_NODES];
 
@@ -98,6 +99,16 @@ struct Comp
     return s1.second > s2.second;
   }
 };
+
+void output_model() {
+  for (int i = 0; i < N_NODES; i++) {
+    cout << i << " ";
+    for (int j = 0; j < K; j++) {
+      cout << model[i][j] << " ";
+    }
+    cout << endl;
+  }
+}
 
 void pin_to_core(size_t core) {
   cpu_set_t cpuset;
@@ -357,6 +368,32 @@ int union_find(int a, int *p) {
   return a;
 }
 
+void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, int start, int end, int thread_id) {
+  pin_to_core(thread_id);
+  int tree[end-start + N_NODES];
+  //int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));  
+
+  for (long long int i = 0; i < end-start + N_NODES; i++) 
+    tree[i] = i;
+
+  for (int i = start; i < end; i++) {
+    DataPoint p = points[i];
+    int src = i-start;
+    int e1 = get<0>(p) + end-start;
+    int e2 = get<1>(p) + end-start;
+    int c1 = union_find(src, tree);
+    int c2 = union_find(e1, tree);
+    int c3 = union_find(e2, tree);
+    tree[c3] = c1;
+    tree[c2] = c1;
+  }
+  for (int i = 0; i < end-start; i++) {
+    int group = union_find(i, tree);
+    CCs[group].push_back(i+start);    
+  }
+  //free(tree);
+ }
+
 map<int, vector<int> > compute_CC(vector<DataPoint> &points, int start, int end) {
   //int tree[end-start + N_NODES];
   int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));
@@ -428,8 +465,8 @@ void cyc_word_embeddings() {
     order[i].resize(n_batches);
   }
 
-  //CC Generation
-  Timer t2;
+  //CC Generation serial
+  /*Timer t2;
   vector<thread> ts;
   double cc_time = 0, alloc_time = 0;
 
@@ -446,10 +483,19 @@ void cyc_word_embeddings() {
     Timer ttt2;
     distribute_ccs(cc, access_pattern, access_length, batch_index_start, i, points, order);
     alloc_time += ttt2.elapsed();
+    }*/
+  //CC Parallel
+  omp_set_num_threads(NTHREAD);
+  map<int, vector<int> > CCs[n_batches];
+#pragma omp parallel for
+  for (int i = 0; i < n_batches; i++) {
+    int start = i * BATCH_SIZE;
+    int end = min((i+1)*BATCH_SIZE, (int)points.size());
+    compute_CC_thread(CCs[i], points, start, end, omp_get_thread_num());
   }
-
-  //cout << "CYCLADES CC ALLOC TIME: " << t2.elapsed() << endl;
-  for (int i = 0; i < ts.size(); i++) ts[i].join();
+  for (int i = 0; i < n_batches; i++) {
+    distribute_ccs(CCs[i], access_pattern, access_length, batch_index_start, i, points, order);
+    }
 
   //Perform cyclades
   float copy_time = 0;
@@ -590,8 +636,8 @@ int main(void) {
   std::cout << std::setprecision(100);
   pin_to_core(0);
 
-  /*sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
-  model = (double **)malloc(sizeof(double *) * N_NODES);
+  sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
+    model = (double **)malloc(sizeof(double *) * N_NODES);
   prev_gradients = (double ***)malloc(sizeof(double **) * N_DATAPOINTS);
   for (int i = 0; i < N_NODES; i++) {
     sum_gradients[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
@@ -602,7 +648,7 @@ int main(void) {
     for (int j = 0; j < 2; j++) {
       prev_gradients[i][j] = (double *) malloc(sizeof(double) * K_TO_CACHELINE);
     }
-    }*/
+  }
 
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
@@ -653,4 +699,8 @@ int main(void) {
   if (CYC) {
     cyc_word_embeddings();
   }
+
+  //if (OUTPUT_MODEL) {
+  //output_model();
+    //}
 }
