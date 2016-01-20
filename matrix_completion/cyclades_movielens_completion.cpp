@@ -766,7 +766,7 @@ void hogwild_completion() {
   }
 
   //Divide to threads
-  float copy_model_time;
+  float copy_model_time = 0;
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
