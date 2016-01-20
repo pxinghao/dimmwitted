@@ -9,9 +9,9 @@ with open(sys.argv[1], 'r') as corpus:
     #text = text[100000*3:100000*20]
     #text = text[100000:]
     #text = text[:10000]
-    text = text[:10000000]
+    #text = text[:10000000]
     
-    words_list = [x for x in set(text.split())]
+    words_list = list(set(text.split()))
     word_to_id = {}
 
     # Write word id mappings
@@ -23,9 +23,12 @@ with open(sys.argv[1], 'r') as corpus:
 
     # Construct graph
     g = {}
-    words = words_list
+    words = text.strip().split(" ")
     lines = [words[i:i+DISTANCE] for i in range(len(words))]
     for line in lines:
+        if len(line) < DISTANCE:
+            continue
+        #print("LINE: ", line)
         first_word = line[0]
         for other_word in line:
             if other_word == first_word:
