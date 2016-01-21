@@ -29,8 +29,8 @@ def get_values(v, command_range, epoch_range, batch_size_range, thread_range, ra
                             values.append(v[c][e][b][t][r][s])
     return values
 
-def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands):
-    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands)
+def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, n_rep):
+    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands) * n_rep
     cur_iter = 0
     loss_values = tree()
     overall_time_values = tree()
@@ -42,14 +42,24 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 for r in rank_range:
                     for s in sync_range:
                         for c in commands:
-                            print("Iteration %d of %d" % (cur_iter, total_iter))
-                            cur_iter += 1
-                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "RLENGTH="+str(r), "SHOULD_SYNC="+\
+                            losses, overall_times, gradient_times = [], [], []
+                            for n in range(n_rep):
+                                print("Iteration %d of %d" % (cur_iter, total_iter))
+                                cur_iter += 1
+                                output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "RLENGTH="+str(r), "SHOULD_SYNC="+\
                                                                                     str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
-                            values = [float(x) for x in output]
-                            losses = [values[i] for i in range(0, len(values), 3)]
-                            overall_times = [values[i] for i in range(1, len(values), 3)]
-                            gradient_times = [values[i] for i in range(2, len(values), 3)]
+                                values = [float(x) for x in output]
+                                if n == 0:
+                                    losses = [values[i] for i in range(0, len(values), 3)]
+                                    overall_times = [values[i] for i in range(1, len(values), 3)]
+                                    gradient_times = [values[i] for i in range(2, len(values), 3)]
+                                else:
+                                    losses = [losses[i] + values[i] for i in range(0, len(values), 3)]
+                                    overall_times = [overall_times[i] + values[i] for i in range(1, len(values), 3)]
+                                    gradient_times = [gradient_times + values[i] for i in range(2, len(values), 3)]
+                            losses = [x / float(n_rep) for x in losses]
+                            overall_times = [x / float(n_rep) for x in overall_times]
+                            gradient_times = [x / float(n_rep) for x in gradient_times]
                             loss_values[c][epoch_range][b][t][r][s] = losses
                             overall_time_values[c][epoch_range][b][t][r][s] = overall_times
                             gradient_time_values[c][epoch_range][b][t][r][s] = gradient_times
@@ -208,7 +218,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                                 average_gradient_times[command][epoch][batch_size][thread][rank][sync] = avg_gradient_time
                                 average_total_times[command][epoch][batch_size][thread][rank][sync] = avg_overall_time
     else:
-        with open('epoch_data.pickle') as f:
+        with open('epochs_data.pickle') as f:
             average_losses, average_gradient_times, average_total_times = pickle.load(f)
 
     with open('epochs_data.pickle', 'w') as f:
@@ -416,7 +426,12 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_all_graphs(0, [10, 30, 80, 100, 150], [2000], [1, 2, 4, 8, 10, 16, 32], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 2)
 #draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 
+#W/o regularization
+draw_all_graphs(0, [50, 100, 150, 200], [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
+draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
+#draw_time_loss_graph(0, 200, [5000], [8], [10], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
+
 # W/ regularization
-draw_all_graphs(0, [50, 100, 150, 200], [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"], 2)
-draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
+#draw_all_graphs(0, [50, 100, 150, 200], [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"], 2)
+#draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc_regularize", "cyc_movielens_hog_regularize"])
     
