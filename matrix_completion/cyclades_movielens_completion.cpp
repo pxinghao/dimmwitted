@@ -12,6 +12,7 @@
 #include <set>
 #include <numa.h>
 #include <sched.h>
+#include <omp.h>
 
 #ifndef TIME_LIMIT
 #define TIME_LIMIT 10000000
@@ -142,6 +143,7 @@ void clear_bookkeeping() {
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
+  #pragma omp parallel for
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -156,6 +158,7 @@ double compute_loss(vector<DataPoint> &p) {
 
 double compute_loss_regularize(vector<DataPoint> &p) {
   double loss = 0;
+  #pragma omp parallel for
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -183,6 +186,7 @@ double compute_loss_regularize(vector<DataPoint> &p) {
 
 double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
   double loss = 0;
+  #pragma omp parallel for
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -197,6 +201,7 @@ double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
 
 double compute_loss_regularize_for_record_epoch(vector<DataPoint> &p, int epoch) {
   double loss = 0;
+  #pragma omp parallel for
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -629,7 +634,11 @@ void cyclades_movielens_completion() {
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_model_timer;
-      copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      //copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      double loss = 0;
+      if (REGULARIZE) loss = compute_loss_regularize(points);
+      else loss = compute_loss(points);
+      cout << loss << " " << overall.elapsed()-copy_model_time << " " << gradient_time.elapsed()-copy_model_time << endl;
       copy_model_time += copy_model_timer.elapsed();
     }
   }
@@ -643,7 +652,7 @@ void cyclades_movielens_completion() {
       cout << compute_loss(points) << endl;
   }
   else {
-    print_loss_for_records(points);
+    //print_loss_for_records(points);
   }
 }
 
@@ -789,7 +798,11 @@ void hogwild_completion() {
     GAMMA *= GAMMA_REDUCTION_FACTOR;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_model_timer;
-      copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      //copy_model_to_records(i, overall.elapsed()-copy_model_time, gradient_time.elapsed()-copy_model_time);
+      double loss = 0;
+      if (REGULARIZE) loss = compute_loss_regularize(points);
+      else loss = compute_loss(points);
+      cout << loss << " " << overall.elapsed()-copy_model_time << " " << gradient_time.elapsed()-copy_model_time << endl;
       copy_model_time += copy_model_timer.elapsed();
     }
   }
@@ -803,7 +816,7 @@ void hogwild_completion() {
       cout << compute_loss(points) << endl;
   }
   else {
-    print_loss_for_records(points);
+    //print_loss_for_records(points);
   }
 }
 
@@ -829,14 +842,14 @@ int main(void) {
   }
 
   if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
-    for (int i = 0; i < N_EPOCHS; i++) {
+    /*for (int i = 0; i < N_EPOCHS; i++) {
       v_model_records[i] = (double **)malloc(sizeof(double *) * N_USERS);
       u_model_records[i] = (double **)malloc(sizeof(double *) * N_MOVIES);
       for (int j = 0; j < N_USERS; j++) 
 	v_model_records[i][j] = (double *)malloc(sizeof(double) * RLENGTH);
       for (int j = 0; j < N_MOVIES; j++) 
 	u_model_records[i][j] = (double *)malloc(sizeof(double) * RLENGTH);
-    }
+	}*/
   }
 
   /*for (int i = 0; i < NTHREAD; i++) {
@@ -854,6 +867,8 @@ int main(void) {
     v_model[j] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, 0);
   for (int j = 0; j < cache_align_n_movies; j++)
   u_model[j] = (double *)numa_alloc_onnode(sizeof(double)*cache_align_rlength, 0);*/
+
+  omp_set_num_threads(32);
   
   srand(0);
   for (int i = 0; i < RLENGTH; i++) {

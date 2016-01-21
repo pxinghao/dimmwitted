@@ -54,9 +54,9 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                     overall_times = [values[i] for i in range(1, len(values), 3)]
                                     gradient_times = [values[i] for i in range(2, len(values), 3)]
                                 else:
-                                    losses = [losses[i] + values[i] for i in range(0, len(values), 3)]
-                                    overall_times = [overall_times[i] + values[i] for i in range(1, len(values), 3)]
-                                    gradient_times = [gradient_times + values[i] for i in range(2, len(values), 3)]
+                                    losses = [losses[i/3] + values[i] for i in range(0, len(values), 3)]
+                                    overall_times = [overall_times[i/3] + values[i] for i in range(1, len(values), 3)]
+                                    gradient_times = [gradient_times[i/3] + values[i] for i in range(2, len(values), 3)]
                             losses = [x / float(n_rep) for x in losses]
                             overall_times = [x / float(n_rep) for x in overall_times]
                             gradient_times = [x / float(n_rep) for x in gradient_times]
@@ -427,7 +427,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_time_loss_graph(0, 150, [2000], [2, 4, 8, 10, 16], [200], [0, 1], ["cyc_movielens_cyc", "cyc_movielens_hog"])
 
 #W/o regularization
-draw_all_graphs(0, [50, 100, 150, 200], [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
+#draw_all_graphs(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
 draw_time_loss_graph(0, 200, [5000], [1, 4, 8, 16, 32], [100, 200], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
 #draw_time_loss_graph(0, 200, [5000], [8], [10], [1], ["cyc_movielens_cyc", "cyc_movielens_hog"], 3)
 
