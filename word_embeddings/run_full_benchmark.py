@@ -29,8 +29,8 @@ def get_values(v, command_range, epoch_range, batch_size_range, thread_range, ra
                             values.append(v[c][e][b][t][r][s])
     return values
 
-def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, n_rep, gammas):
-    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands) * n_rep
+def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands,  gammas):
+    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands)
     cur_iter = 0
     loss_values = tree()
     overall_time_values = tree()
@@ -79,8 +79,8 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
                 plt.savefig(title + ".png")
                 plt.clf()    
 
-def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, gammas=None):
-    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands)
+def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, n_rep, gammas=None):
+    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands) * n_rep
     cur_iter = 0
     loss_values = tree()
     overall_time_values = tree()
@@ -511,4 +511,4 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
     
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
-draw_time_loss_graph(0, 200, [4250], [8], [30, 100], [1], ["cyc_word_embeddings_serial", "cyc_word_embeddings_serial_shuffle"]);
+draw_time_loss_graph(0, 200, [4250], [1, 4, 8, 16, 32], [30, 100], [1], ["cyc_word_embeddings_serial", "cyc_word_embeddings_serial_shuffle"], 3);
