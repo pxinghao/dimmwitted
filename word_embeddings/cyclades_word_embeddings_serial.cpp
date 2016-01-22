@@ -189,16 +189,16 @@ int main(void) {
       double full_gradient[N_NODES][K];
       for (int i = 0; i < N_NODES; i++) {
 	for (int j = 0; j < K; j++) {
-	  model[i][j] -= GAMMA * gradient[i][j];
+	  //model[i][j] -= GAMMA * gradient[i][j];
 	  
 	  //Full gradient = (cur_grad - prev_grad + sum_grad) / n
-	  /*full_gradient[i][j] = (gradient[i][j] - prev_grad[pt_index][i][j] + sum_grad[i][j] / (double)N_DATAPOINTS);
+	  full_gradient[i][j] = (gradient[i][j] - prev_grad[pt_index][i][j] + sum_grad[i][j] / (double)N_DATAPOINTS);
 	  //Update model
 	  model[i][j] -= GAMMA * full_gradient[i][j];
 	  //Update sum
 	  sum_grad[i][j] += -prev_grad[pt_index][i][j] + gradient[i][j];
 	  //Update previous gradient
-	  prev_grad[pt_index][i][j] = gradient[i][j];*/
+	  prev_grad[pt_index][i][j] = gradient[i][j];
 	}
 	//Project constraints
 	//project_constraint((double *)model[i]);
