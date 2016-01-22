@@ -25,7 +25,6 @@
 #define HOG 0
 #endif
 
-#define N_DATAPOINTS 1000209
 #define N_USERS 6041 //1M dataset
 #define N_MOVIES 3091 //1M dataset
 //#define N_USERS 71568
@@ -33,11 +32,11 @@
 
 #define N_NUMA_NODES 2
 #ifndef N_EPOCHS
-#define N_EPOCHS 800000
+#define N_EPOCHS 80
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 5000
+#define BATCH_SIZE 500
 #endif
 
 #ifndef NTHREAD
@@ -45,7 +44,7 @@
 #endif
 
 #ifndef RLENGTH
-#define RLENGTH 50
+#define RLENGTH 100
 #endif
 
 #if HOG == 1
@@ -68,17 +67,13 @@
 #define REGULARIZE 0
 #endif
 
-#ifndef SAGA
-#define SAGA 1
-#endif
-
 #ifndef CRIMP
 #define CRIMP 0
 #endif
 
 #define GAMMA_REDUCTION_FACTOR 1
 
-double GAMMA = 5e-3;
+double GAMMA = 5e-5;
 double ALPHA = 1 / (double)(RLENGTH * (N_MOVIES + N_USERS));
 double C = 0;
 
@@ -98,14 +93,11 @@ int volatile thread_batch_on[NTHREAD];
 int volatile thread_batch_on2[NTHREAD];
 
 //Bookkeeping
-int bookkeeping_v[N_USERS], bookkeeping_u[N_MOVIES], bookkeeping_saga[N_USERS+N_MOVIES];
+int bookkeeping_v[N_USERS], bookkeeping_u[N_MOVIES];
 
 //Initialize v and h matrix models
 //double ** v_model __attribute__((aligned(64))), **u_model __attribute__((aligned(64)));
 
-double chosen_prev_grad = 0;
-double ***prev_grad2, **prev_grad_labels;
-double **sum_grad, **prev_grad[NTHREAD];
 double ** v_model_records[N_EPOCHS];
 double ** u_model_records[N_EPOCHS];
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
@@ -144,37 +136,14 @@ void pin_to_core(size_t core) {
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
-void update_coords() {
-  for (int i = 0; i < N_USERS; i++) {
-    double diff = N_DATAPOINTS - bookkeeping_saga[i];
-    for (int j = 0; j < RLENGTH; j++) {
-      v_model[i][j] -= GAMMA * diff * sum_grad[i][j] / N_DATAPOINTS;
-    }
-  }
-  for (int i = 0; i < N_MOVIES; i++) {
-    double diff = N_DATAPOINTS - bookkeeping_saga[i+N_USERS];
-    for (int j = 0; j < RLENGTH; j++) {
-      u_model[i][j] -= GAMMA * diff * sum_grad[i+N_USERS][j] / N_DATAPOINTS;
-    }
-  }
-}
-
 void clear_bookkeeping() {
-  if (REGULARIZE) {
-    for (int i = 0; i < N_USERS; i++) bookkeeping_v[i] = 0;
-    for (int i = 0; i < N_MOVIES; i++) bookkeeping_u[i] = 0;
-  }
-  if (SAGA) {
-    update_coords();
-    for (int i = 0; i < N_USERS+N_MOVIES; i++) {
-      bookkeeping_saga[i] = 0;
-    }
-  }
+  for (int i = 0; i < N_USERS; i++) bookkeeping_v[i] = 0;
+  for (int i = 0; i < N_MOVIES; i++) bookkeeping_u[i] = 0;
 }
 
 double compute_loss(vector<DataPoint> &p) {
   double loss = 0;
-#pragma omp parallel for reduction(+: loss)
+#pragma omp parallel for reduction(+:loss)
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -189,7 +158,7 @@ double compute_loss(vector<DataPoint> &p) {
 
 double compute_loss_regularize(vector<DataPoint> &p) {
   double loss = 0;
-  #pragma omp parallel for
+#pragma omp parallel for reduction(+:loss)
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -217,7 +186,7 @@ double compute_loss_regularize(vector<DataPoint> &p) {
 
 double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
   double loss = 0;
-  #pragma omp parallel for
+#pragma omp parallel for reduction(+:loss)
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -232,7 +201,7 @@ double compute_loss_for_record_epoch(vector<DataPoint> &p, int epoch) {
 
 double compute_loss_regularize_for_record_epoch(vector<DataPoint> &p, int epoch) {
   double loss = 0;
-  #pragma omp parallel for
+#pragma omp parallel for reduction(+:loss)
   for (int i = 0; i < p.size(); i++) {
     int x = get<0>(p[i]),  y = get<1>(p[i]);
     double r = get<2>(p[i]), s = 0, dp = 0;
@@ -286,33 +255,9 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
   }
 }
 
-int saga_test() {
-
-  cout << "YOO MAN " << endl;
-  double sums_prevs[N_USERS+N_MOVIES][RLENGTH];
-  for (int i = 0; i < N_USERS+N_MOVIES; i++)
-    for (int k = 0; k <RLENGTH; k++)
-      sums_prevs[i][k] = 0;
-  for (int i = 0; i < N_DATAPOINTS; i++) {
-    int x = prev_grad_labels[i][0], y = prev_grad_labels[i][1];
-    for (int j = 0; j < RLENGTH; j++) {
-      sums_prevs[x][j] += prev_grad2[i][0][j];
-      sums_prevs[y+N_USERS][j] += prev_grad2[i][1][j];
-    }
-  }
-  for (int i = 0; i < N_USERS+N_MOVIES; i++) {
-    for (int k = 0; k < RLENGTH; k++) {
-      if (sum_grad[i][k] - sums_prevs[i][k] > 1e-7) {
-	cout << "TEST: " << sum_grad[i][k] << " vs " << sums_prevs[i][k] << endl;
-	return 0;
-      }
-    }
-  }
-  return 1;
-}
-
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id) {
   pin_to_core(thread_id);
+
   for (int batch = 0; batch < access_length.size(); batch++) {
     
     if (SHOULD_SYNC) {
@@ -327,7 +272,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	    break;
 	  }
 	}
-      }
+	}
     }
     
     //For every data point in the connected component
@@ -338,9 +283,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int x = get<0>(p), y = get<1>(p);
       double r = get<2>(p);            
       double gradient = 0;
-      int indx = batch_index_start[batch]+i;
       int update_order = order[batch_index_start[batch]+i];
-
+      
       for (int j = 0; j < RLENGTH; j++) {
 	gradient += v_model[x][j] * u_model[y][j];
       }
@@ -353,75 +297,21 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	v_reg_param = pow((1-2*ALPHA*GAMMA), v_diff);
 	u_reg_param = pow((1-2*ALPHA*GAMMA), u_diff);
       }
-      if (SAGA) {
-	double diff_x = update_order - bookkeeping_saga[x] - 1;
-	double diff_y = update_order - bookkeeping_saga[y+N_USERS] - 1;
-	for (int j = 0; j < RLENGTH; j++) {
-	  v_model[x][j] -=  (double)GAMMA * diff_x * sum_grad[x][j] / N_DATAPOINTS;
-	  u_model[y][j] -=  (double)GAMMA * diff_y * sum_grad[y+N_USERS][j] / N_DATAPOINTS;
-	}
-      }
-
-      prev_grad_labels[update_order-1][0] = x;
-      prev_grad_labels[update_order-1][1] = y;
 
       //Perform updates
       for (int j = 0; j < RLENGTH; j++) {
 	v_model[x][j] = v_reg_param * v_model[x][j];
 	u_model[y][j] = u_reg_param * u_model[y][j];
-
-	if (SAGA) {
-	  double grady = gradient * u_model[y][j];
-	  double gradx = gradient * v_model[x][j];
-	  
-	  if (epoch == 0) {
-	    v_model[x][j] -= GAMMA * gradx;
-	    u_model[y][j] -= GAMMA * grady;
-	    
-	    /*sum_grad[x][j] += gradx - prev_grad[thread_id][indx][j*2];
-	    prev_grad[thread_id][indx][j*2] = gradx;
-	    sum_grad[y+N_USERS][j] += grady - prev_grad[thread_id][indx][j*2+1];
-	    prev_grad[thread_id][indx][j*2+1] = grady;*/
-
-	    sum_grad[x][j] += gradx - prev_grad2[update_order-1][0][j];
-	    prev_grad2[update_order-1][0][j] = gradx;
-	    sum_grad[y+N_USERS][j] += grady - prev_grad2[update_order-1][1][j];
-	    prev_grad2[update_order-1][1][j] = grady;
-	  }
-	  else {
-	    /*v_model[x][j] -= GAMMA * (gradx - prev_grad[thread_id][indx][j*2] + sum_grad[x][j] / N_DATAPOINTS);
-	    sum_grad[x][j] += gradx - prev_grad[thread_id][indx][j*2];
-	    prev_grad[thread_id][indx][j*2] = gradx;
-	    
-	    u_model[y][j] -= GAMMA * (grady - prev_grad[thread_id][indx][j*2+1] + sum_grad[y+N_USERS][j] / N_DATAPOINTS);
-	    sum_grad[y+N_USERS][j] += grady - prev_grad[thread_id][indx][j*2+1];
-	    prev_grad[thread_id][indx][j*2+1] = grady;*/
-	    
-	    /*v_model[x][j] -= GAMMA * (gradx - prev_grad2[update_order-1][0][j] + sum_grad[x][j] / N_DATAPOINTS);
-	    sum_grad[x][j] += gradx - prev_grad2[update_order-1][0][j];
-	    prev_grad2[update_order-1][0][j] = gradx;
-	    
-	    u_model[y][j] -= GAMMA * (grady - prev_grad2[update_order-1][1][j] + sum_grad[y+N_USERS][j] / N_DATAPOINTS);
-	    sum_grad[y+N_USERS][j] += grady - prev_grad2[update_order-1][1][j];
-	    prev_grad2[update_order-1][1][j] = grady;*/
-	  }
-	}
-	else {
-	  double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
-	  double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
-	  v_model[x][j] = new_v;
-	  u_model[y][j] = new_u;
-	}
+	double new_v = v_model[x][j] - GAMMA * gradient * u_model[y][j];
+	double new_u = u_model[y][j] - GAMMA * gradient * v_model[x][j];
+	v_model[x][j] = new_v;
+	u_model[y][j] = new_u;
       }
 
       //Update bookkeeping
       if (REGULARIZE) {
 	bookkeeping_v[x] = update_order;
 	bookkeeping_u[y] = update_order;
-      }
-      if (SAGA) {
-	bookkeeping_saga[x] = update_order;
-	bookkeeping_saga[y+N_USERS] = update_order;
       }
     }
   }
@@ -453,7 +343,6 @@ void do_cyclades_gradient_descent_with_points_mod_rep(DataPoint * access_pattern
     
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
-
       //Compute gradient
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       //DataPoint p = access_pattern[i];
@@ -723,14 +612,17 @@ void cyclades_movielens_completion() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
+    //cout << compute_loss_regularize(points) << endl;
+    if (REGULARIZE) {
+      clear_bookkeeping();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));      
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));      
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -749,8 +641,6 @@ void cyclades_movielens_completion() {
       cout << loss << " " << overall.elapsed()-copy_model_time << " " << gradient_time.elapsed()-copy_model_time << endl;
       copy_model_time += copy_model_timer.elapsed();
     }
-    clear_bookkeeping();
-    saga_test();
   }
 
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -817,10 +707,12 @@ void cyclades_movielens_completion_mod_rep() {
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
-    clear_bookkeeping();
+    if (REGULARIZE) {
+      clear_bookkeeping();
+    }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
@@ -893,11 +785,11 @@ void hogwild_completion() {
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -931,7 +823,6 @@ void hogwild_completion() {
 int main(void) {
   setprecision(15);
   pin_to_core(0);
-
   //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
   int num_cpus = numa_num_task_cpus();
@@ -948,42 +839,6 @@ int main(void) {
   for (int i = 0; i < NTHREAD; i++) {
     cur_bytes_allocated[i] = 0;
     cur_datapoints_used[i] = 0;
-  }
-  
-  //GET RID OF
-  prev_grad_labels = (double **)malloc(sizeof(double *) * N_DATAPOINTS);
-  for (int i = 0; i < N_DATAPOINTS; i++) {
-    prev_grad_labels[i] = (double *)malloc(sizeof(double) * 2);
-    for (int j =0 ; j < 2 ;j ++) {
-      prev_grad_labels[i][j] = 0;
-    }
-  }
-  prev_grad2 = (double ***)malloc(sizeof(double**) * N_DATAPOINTS);
-  for (int i = 0; i < N_DATAPOINTS; i++) {
-    prev_grad2[i] = (double **)malloc(sizeof(double *) * 2);
-    for (int j = 0; j < 2; j++) {
-      prev_grad2[i][j] = (double *)malloc(sizeof(double) * cache_length_rlength);
-      for (int k =0 ; k < cache_length_rlength; k++) {
-	prev_grad2[i][j][k] = 0;
-      }
-    }
-  }
-
-  sum_grad = (double **)malloc(sizeof(double *) * (N_USERS + N_MOVIES));
-  for (int i = 0; i < N_USERS + N_MOVIES; i++) {
-    sum_grad[i] = (double *)malloc(sizeof(double) * (cache_length_rlength));
-    for (int j = 0; j < cache_length_rlength; j++) {
-      sum_grad[i][j] = 0;
-    }
-  }
-  for (int i = 0; i < NTHREAD; i++) {
-    prev_grad[i] = (double **)malloc(sizeof(double *) * N_DATAPOINTS);
-    for (int j = 0; j < N_DATAPOINTS; j++) {
-      prev_grad[i][j] = (double *)malloc(sizeof(double) * 2 *cache_length_rlength);
-      for (int k = 0; k < 2 * cache_length_rlength; k++) {
-	prev_grad[i][j][k] = 0;
-      }
-    }
   }
 
   if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
