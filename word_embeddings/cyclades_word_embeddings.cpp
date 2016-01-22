@@ -16,7 +16,7 @@
 #include <mutex> 
 #include <omp.h>
 
-#define WORD_EMBEDDINGS_FILE "sparse_graph"
+#define WORD_EMBEDDINGS_FILE "full_graph"
 //#define N_NODES 628
 //#define N_DATAPOINTS 5607
 //#define N_NODES 3822
@@ -31,7 +31,7 @@
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 200000
 #endif 
 
 #ifndef BATCH_SIZE
@@ -49,7 +49,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -75,7 +75,7 @@
 #define START_GAMMA 1e-10 // SGD
 #endif
 
-double C = 0;
+double volatile C = 0;
 double GAMMA = START_GAMMA;
 //double GAMMA = 3e-4;
 //double GAMMA = 8e-4;
@@ -263,7 +263,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Keep track of sums for optimizing C
-      C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C) * (log(r) - l2norm_sqr - C);
+      C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -604,7 +604,7 @@ void cyc_word_embeddings() {
 #pragma omp parallel for reduction(+:c_gradient)
     for (int t = 0; t < NTHREAD; t++) {
       for (int d = 0; d < thread_load_balance[t]; d++) {
-	c_gradient += C_sum_mult[t][d];
+	c_gradient += -C_sum_mult[t][d];
       }
     }
     C -= GAMMA * c_gradient;
@@ -716,7 +716,7 @@ void hog_word_embeddings() {
 #pragma omp parallel for reduction(+:c_gradient)
     for (int t = 0; t < NTHREAD; t++) {
       for (int d = 0; d < order[t].size(); d++) {
-	c_gradient += C_sum_mult[t][d];
+	c_gradient += -C_sum_mult[t][d];
       }
     }
     C -= GAMMA * c_gradient;
