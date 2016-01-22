@@ -31,7 +31,7 @@
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 10
 #endif 
 
 #ifndef BATCH_SIZE
@@ -87,7 +87,7 @@ int volatile thread_batch_on[NTHREAD];
 //double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double prevv_gradients[N_DATAPOINTS][2][K_TO_CACHELINE];
-double *C_sum_mult;
+double *C_sum_mult[NTHREAD];
 double ** prev_gradients[NTHREAD];
 double ** model, **sum_gradients;
 double **model_records[N_EPOCHS];
@@ -263,7 +263,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Keep track of sums for optimizing C
-      C_sum_mult[indx] = 2 * r * (log(r) - l2norm_sqr - C) * (log(r) - l2norm_sqr - C);
+      C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C) * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -560,7 +560,9 @@ void cyc_word_embeddings() {
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
+    C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
+      C_sum_mult[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -598,11 +600,12 @@ void cyc_word_embeddings() {
     GAMMA *= GAMMA_REDUCTION;
 
     //Optimize C
-    double c_gradient = 0;
-    
+    double c_gradient = 0;    
 #pragma omp parallel for reduction(+:c_gradient)
-    for (int d = 0; d < N_DATAPOINTS; d++) {
-      c_gradient += C_sum_mult[d];
+    for (int t = 0; t < NTHREAD; t++) {
+      for (int d = 0; d < thread_load_balance[t]; d++) {
+	c_gradient += C_sum_mult[t][d];
+      }
     }
     C -= GAMMA * c_gradient;
 
@@ -674,7 +677,9 @@ void hog_word_embeddings() {
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
+    C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
     for (int j = 0; j < order[i].size(); j++) {
+      C_sum_mult[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -709,8 +714,10 @@ void hog_word_embeddings() {
     
     double c_gradient = 0;
 #pragma omp parallel for reduction(+:c_gradient)
-    for (int d = 0; d < N_DATAPOINTS; d++) {
-      c_gradient += C_sum_mult[d];
+    for (int t = 0; t < NTHREAD; t++) {
+      for (int d = 0; d < order[t].size(); d++) {
+	c_gradient += C_sum_mult[t][d];
+      }
     }
     C -= GAMMA * c_gradient;
 
@@ -733,11 +740,6 @@ int main(void) {
   std::cout << std::fixed << std::showpoint;
   std::cout << std::setprecision(20);
   pin_to_core(0);
-
-  C_sum_mult = (double *)malloc(sizeof(double) * N_DATAPOINTS);
-  for (int i = 0; i < N_DATAPOINTS; i++) {
-    C_sum_mult[i] = 0;
-  }
 
   sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
   model = (double **)malloc(sizeof(double *) * N_NODES);
