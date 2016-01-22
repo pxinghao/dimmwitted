@@ -10,7 +10,8 @@ with open(sys.argv[1], 'r') as corpus:
     #text = text[100000:]
     #text = text[:10000]
     #text = text[:10000000]
-    text = text[:len(text)/100]
+    #text = text[:len(text)/100000]
+    text = text[len(text)/100000:len(text)/100000 + 1000]
     
     words_list = list(set(text.split()))
     word_to_id = {}

@@ -23,19 +23,19 @@
 //#define N_DATAPOINTS 80821
 //#define N_NODES 213271
 //#define N_DATAPOINTS 20207156
-#define N_NODES 2765
-#define N_DATAPOINTS 61709
+#define N_NODES 16774
+#define N_DATAPOINTS 622948
 
 #ifndef NTHREAD
 #define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 500
+#define N_EPOCHS 10
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 4250 //full 80 mb
+#define BATCH_SIZE 1 //full 80 mb
 //#define BATCH_SIZE 2000 //1/10 of 80 mb SGD
 //#define BATCH_SIZE 490
 #endif
@@ -66,11 +66,13 @@
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 #ifndef SAG
-#define SAG 1
+#define SAG 0
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 3.41e-6
+//#define START_GAMMA 2.3e-4//3.42e-5
+#define START_GAMMA 9e-7 // SAG
+//#define START_GAMMA 5e-4 // SGD
 #endif
 
 double C = 0;
@@ -85,6 +87,9 @@ int volatile thread_batch_on[NTHREAD];
 //double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double prevv_gradients[N_DATAPOINTS][2][K_TO_CACHELINE];
+int oorder_count = 0;
+int oorder[N_NODES][N_NODES];
+double prevv_gradients[N_DATAPOINTS][2*K];
 double ** prev_gradients[NTHREAD];
 double ** model, **sum_gradients;
 double **model_records[N_EPOCHS];
@@ -109,6 +114,8 @@ struct Comp
     return s1.second > s2.second;
   }
 };
+
+int myrandom (int i) { return std::rand()%i;}
 
 void output_model() {
   for (int i = 0; i < N_NODES; i++) {
@@ -200,7 +207,7 @@ double copy_model_to_records(int epoch, double overall_time, double gradient_tim
   }
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id) {
+void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
 
   pin_to_core(thread_id);
 
@@ -232,7 +239,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int update_order = order[batch_index_start[batch]+i];      
       double diff_x = update_order - bookkeeping[x] - 1;
       double diff_y = update_order - bookkeeping[y] - 1;
-
+      
       if (diff_x <= 0) diff_x = 0;
       if (diff_y <= 0) diff_y = 0;
 
@@ -241,6 +248,14 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	  model[x][j] -=  (double)GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  (double)GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
 	}
+      }
+
+      for (int j = 0; j < K; j++) {
+	//cout << prev_grad[pt_index][x][j] << endl;
+	//cout << sum_gradients[x][j] << endl;
+	//cout << model[x][j] << endl;
+	//cout << model[y][j] << endl;
+	//cout << x << " " << y << endl;
       }
 
       //Get gradient multiplies
@@ -253,19 +268,40 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       //Apply gradient update
       for (int j = 0; j < K; j++) {
 	double gradient =  -1 * (mult * 2 * (model[x][j] + model[y][j]));
+	//double gradient = r * 2 * (model[x][j] - model[y][j]);
 	
 	if (SAG) {
-
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += gradient - prev_gradients[thread_id][indx][j*2];
-	  prev_gradients[thread_id][indx][j*2] = gradient;
-
-	  model[y][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2+1] + sum_gradients[y][j]) / N_DATAPOINTS;
-	  sum_gradients[y][j] += gradient - prev_gradients[thread_id][indx][j*2+1];
-	  prev_gradients[thread_id][indx][j*2+1] = gradient;
 	  
-	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  model[y][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j+K] + sum_gradients[y][j]) / N_DATAPOINTS;
+	  /*model[x][j] -= GAMMA * (gradient - prevv_gradients[oorder[x][y]][j*2] + sum_gradients[x][j]) / min(n_datapoints_seen, N_DATAPOINTS);
+	  sum_gradients[x][j] += gradient - prevv_gradients[oorder[x][y]][j*2];
+	  prevv_gradients[oorder[x][y]][j*2] = gradient;
+
+	  model[y][j] -= GAMMA * (gradient - prevv_gradients[oorder[x][y]][j*2+1] + sum_gradients[y][j]) / min(n_datapoints_seen, N_DATAPOINTS);
+	  sum_gradients[y][j] += gradient - prevv_gradients[oorder[x][y]][j*2+1];
+	  prevv_gradients[oorder[x][y]][j*2+1] = gradient;*/
+
+	  if (epoch != 0) {
+	    model[x][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2] + sum_gradients[x][j] / N_DATAPOINTS);
+	    //model[x][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2] + sum_gradients[x][j]) / N_DATAPOINTS;
+	    sum_gradients[x][j] += gradient - prev_gradients[thread_id][indx][j*2];
+	    prev_gradients[thread_id][indx][j*2] = gradient;
+	    
+	    model[y][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2+1] + sum_gradients[y][j] / N_DATAPOINTS);
+	    //model[y][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j*2+1] + sum_gradients[y][j]) / N_DATAPOINTS;
+	    sum_gradients[y][j] += gradient - prev_gradients[thread_id][indx][j*2+1];
+	    prev_gradients[thread_id][indx][j*2+1] = gradient;
+	  }
+	  else {
+	    model[x][j] -= GAMMA * gradient;
+	    model[y][j] -= GAMMA * gradient;
+	    sum_gradients[x][j] += gradient - prev_gradients[thread_id][indx][j*2];
+	    prev_gradients[thread_id][indx][j*2] = gradient;
+	    sum_gradients[y][j] += gradient - prev_gradients[thread_id][indx][j*2+1];
+	    prev_gradients[thread_id][indx][j*2+1] = gradient;
+	  }
+	  
+	  /*model[x][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j] + sum_gradients[x][j]) / min(n_datapoints_seen, N_DATAPOINTS);
+	  model[y][j] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j+K] + sum_gradients[y][j]) / min(n_datapoints_seen, N_DATAPOINTS);
 	  sum_gradients[x][j] += gradient - prev_gradients[thread_id][indx][j];
 	  sum_gradients[y][j] += gradient - prev_gradients[thread_id][indx][j+K];
 	  prev_gradients[thread_id][indx][j] = gradient;
@@ -460,14 +496,20 @@ void initialize_model() {
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
       model[i][j] = rand() / (double)RAND_MAX;
+      //model[i][j] = .5;
     }
   }
 }
 
 void cyc_word_embeddings() {
   vector<DataPoint> points = get_word_embeddings_data();
+  vector<DataPoint> points_copy = points;
+  for (int i = 0; i < points.size(); i++) {
+    int x = get<0>(points[i]), y = get<1>(points[i]);
+    oorder[x][y] = i;
+  }
   initialize_model();
-  random_shuffle(points.begin(), points.end());
+  //random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Access pattern generation
@@ -541,11 +583,11 @@ void cyc_word_embeddings() {
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -557,26 +599,28 @@ void cyc_word_embeddings() {
     clear_bookkeeping();
     GAMMA *= GAMMA_REDUCTION;
 
-    /*if (i % 1 == 0) {
-      random_shuffle(points.begin(), points.end());
+    if (i % 1 == 0) {
+      random_shuffle(points_copy.begin(), points_copy.end(), myrandom);
+      
       for (int ii = 0; ii < NTHREAD; ii++) {
+	numa_free(access_pattern[ii], thread_load_balance[ii] * sizeof(DataPoint));
+	cur_bytes_allocated[ii] = 0;
 	thread_load_balance[ii] = 0;
 	cur_datapoints_used[ii] = 0;
       }
       for (int ii = 0; ii < n_batches; ii++) {
       
 	int start = ii * BATCH_SIZE;
-	int end = min((ii+1)*BATCH_SIZE, (int)points.size());	
-	///Compute connected components of data points
+	int end = min((ii+1)*BATCH_SIZE, (int)points_copy.size());	
+	///Compute connected components of data points_copy
 	Timer ttt;
-	map<int, vector<int> > cc = compute_CC(points, start, end);
+	map<int, vector<int> > cc = compute_CC(points_copy, start, end);
 	//Distribute connected components across threads
 	Timer ttt2;
-	distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points, order);
-      }
-      
+	distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points_copy, order);
+      }     
       //END
-      }*/
+    }
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -644,11 +688,11 @@ void hog_word_embeddings() {
     //cout << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0);
+      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -669,8 +713,9 @@ void hog_word_embeddings() {
 }
 
 int main(void) {
+  srand(0);
   std::cout << std::fixed << std::showpoint;
-  std::cout << std::setprecision(100);
+  std::cout << std::setprecision(20);
   pin_to_core(0);
 
   sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
@@ -682,7 +727,7 @@ int main(void) {
 
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
-    for (int j = 0; j < K; j++) {
+    for (int j = 0; j < K_TO_CACHELINE; j++) {
       sum_gradients[i][j] = 0;
     }
   }

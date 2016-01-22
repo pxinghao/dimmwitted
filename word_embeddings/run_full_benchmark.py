@@ -79,7 +79,7 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
                 plt.savefig(title + ".png")
                 plt.clf()    
 
-def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands):
+def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, gammas=None):
     total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands)
     cur_iter = 0
     loss_values = tree()
@@ -91,11 +91,14 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
             for t in thread_range:
                 for r in rank_range:
                     for s in sync_range:
-                        for c in commands:
+                        for i, c in enumerate(commands):
                             print("Iteration %d of %d" % (cur_iter, total_iter))
                             cur_iter += 1
-                            output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+\
-                                                                                    str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
+                            params = ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"]
+                            if gammas != None:
+                                params.append("START_GAMMA="+str(gammas[i]))
+                            output = run_command_with_params_and_get_output(c, params)
+
                             values = [float(x) for x in output]
                             losses = [values[i] for i in range(0, len(values), 3)]
                             overall_times = [values[i] for i in range(1, len(values), 3)]
@@ -118,7 +121,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.xlabel("Time")
                 plt.ylabel("Loss")
                 for s in sync_range:
-                    for c in commands:
+                    for i, c in enumerate(commands):
                         times = overall_time_values[c][epoch_range][b][t][r][s]
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         print(c)
@@ -143,7 +146,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.xlabel("Time")
                 plt.ylabel("Loss")
                 for s in sync_range:
-                    for c in commands:
+                    for i, c in enumerate(commands):
                         times = gradient_time_values[c][epoch_range][b][t][r][s]
                         losses = loss_values[c][epoch_range][b][t][r][s]
                         if 'hog' in c:
@@ -157,6 +160,28 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.savefig(title + ".png")
                 plt.clf()
 
+    for b in batch_size_range:
+        for t in thread_range:
+            for r in rank_range:
+                title = "Gradient_Epoch_Loss_batch=%d_thread=%d_rank=%d" % (b, t, r)
+                plt.figure()
+                plt.title(title, fontsize=12)
+                plt.xlabel("Epoch")
+                plt.ylabel("Loss")
+                for s in sync_range:
+                    for i, c in enumerate(commands):
+                        epochs = range(0, epoch_range)
+                        losses = loss_values[c][epoch_range][b][t][r][s]
+                        if 'hog' in c:
+                            if s:
+                                plt.plot(epochs, losses, label=c)
+                        else:
+                            plt.plot(epochs, losses, label=c+" sync="+str(s))
+                plt.yscale('log')
+                #plt.xscale('log')
+                plt.legend(loc="upper right", fontsize=8)
+                plt.savefig(title + ".png")
+                plt.clf()
     
     hog_command = [x for x in commands if 'hog' in x]
     if len(hog_command) != 0:
@@ -172,7 +197,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.xlabel("Time")
                 plt.ylabel("hog_loss/cyc_loss")
                 for s in sync_range:
-                    for c in commands:
+                    for i,c in enumerate(commands):
                         if c == hog_command:
                             continue
                         hog_times = gradient_time_values[hog_command][epoch_range][b][t][r][s]
@@ -203,7 +228,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 plt.xlabel("Time")
                 plt.ylabel("hog_loss/cyc_loss")
                 for s in sync_range:
-                    for c in commands:
+                    for i, c in enumerate(commands):
                         if hog_command == c:
                             continue
                         hog_times = overall_time_values[hog_command][epoch_range][b][t][r][s]
@@ -220,7 +245,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 best_loss = min(best_loss, cyc_losses[i2])
                             cyc_losses_aligned.append(best_loss)
                         loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
-                        plt.plot(hog_times, loss_ratio, label=c+" sync="+str(s))
+                        plt.plot(hog_times, loss_ratio, label=c+" sync="+str(s));
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -474,7 +499,10 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 #draw_time_loss_graph(1, 200, [500], [1, 8, 16], [30], [0, 1], ["cyc_word_embeddings_cyc", "cyc_word_embeddings_hog"])
 #draw_time_loss_graph(1, 500, [4250], [1, 4, 8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"])
-draw_time_loss_graph(0, 100, [2000], [1, 4, 8], [30], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
+#draw_time_loss_graph(0, 500, [4250], [4, 8], [30], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
 #draw_time_loss_graph(0, 1000, [300], [1, 8], [200], [1], ["cyc_word_embeddings_cyc_sag", "cyc_word_embeddings_hog_sag"])
 #draw_epoch_loss_graph(0, 100, [300], [8], [2], [1], ["cyc_word_embeddings_cyc"], [.9])
     
+#draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
+
+draw_time_loss_graph(0, 20, [4250], [8], [30], [1], ["cyc_word_embeddings_serial", "cyc_word_embeddings_serial_shuffle"]);
