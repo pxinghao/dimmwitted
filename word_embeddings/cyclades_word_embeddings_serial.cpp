@@ -147,10 +147,10 @@ int main(void) {
       random_shuffle(pattern.begin(), pattern.end());
     
     //For each sampled datapoint
-    for (int  i = 0; i < pts.size(); i++) {
+    for (int  ii = 0; ii < pts.size(); ii++) {
 
       //Compute the gradient at every coordinate in the model
-      int pt_index = pattern[i];
+      int pt_index = pattern[ii];
       DataPoint pt = pts[pt_index];
       //DataPoint pt = pts[rand() % pts.size()];
       int first_coord = get<0>(pt);
