@@ -16,7 +16,7 @@
 #include <mutex> 
 #include <omp.h>
 
-#define WORD_EMBEDDINGS_FILE "full_graph"
+#define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 628
 //#define N_DATAPOINTS 5607
 //#define N_NODES 3822
@@ -572,7 +572,7 @@ void cyc_word_embeddings() {
   float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
+    //cout << compute_loss(points) << endl;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
       //copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);

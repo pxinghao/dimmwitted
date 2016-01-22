@@ -29,8 +29,8 @@ def get_values(v, command_range, epoch_range, batch_size_range, thread_range, ra
                             values.append(v[c][e][b][t][r][s])
     return values
 
-def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, gammas):
-    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands)
+def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands, n_rep, gammas):
+    total_iter = len(batch_size_range) * len(thread_range) * len(rank_range) * len(sync_range) * len(commands) * n_rep
     cur_iter = 0
     loss_values = tree()
     overall_time_values = tree()
@@ -92,17 +92,23 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 for r in rank_range:
                     for s in sync_range:
                         for i, c in enumerate(commands):
-                            print("Iteration %d of %d" % (cur_iter, total_iter))
-                            cur_iter += 1
-                            params = ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"]
-                            if gammas != None:
-                                params.append("START_GAMMA="+str(gammas[i]))
-                            output = run_command_with_params_and_get_output(c, params)
-
-                            values = [float(x) for x in output]
-                            losses = [values[i] for i in range(0, len(values), 3)]
-                            overall_times = [values[i] for i in range(1, len(values), 3)]
-                            gradient_times = [values[i] for i in range(2, len(values), 3)]
+                            for n in range(n_rep):
+                                print("Iteration %d of %d" % (cur_iter, total_iter))
+                                cur_iter += 1
+                                output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+\
+                                                                                    str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
+                                values = [float(x) for x in output]
+                                if n == 0:
+                                    losses = [values[i] for i in range(0, len(values), 3)]
+                                    overall_times = [values[i] for i in range(1, len(values), 3)]
+                                    gradient_times = [values[i] for i in range(2, len(values), 3)]
+                                else:
+                                    losses = [losses[i/3] + values[i] for i in range(0, len(values), 3)]
+                                    overall_times = [overall_times[i/3] + values[i] for i in range(1, len(values), 3)]
+                                    gradient_times = [gradient_times[i/3] + values[i] for i in range(2, len(values), 3)]
+                            losses = [x / float(n_rep) for x in losses]
+                            overall_times = [x / float(n_rep) for x in overall_times]
+                            gradient_times = [x / float(n_rep) for x in gradient_times]
                             loss_values[c][epoch_range][b][t][r][s] = losses
                             overall_time_values[c][epoch_range][b][t][r][s] = overall_times
                             gradient_time_values[c][epoch_range][b][t][r][s] = gradient_times
@@ -505,4 +511,4 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
     
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
-draw_time_loss_graph(0, 30, [4250], [8], [30], [1], ["cyc_word_embeddings_serial", "cyc_word_embeddings_serial_shuffle"]);
+draw_time_loss_graph(0, 200, [4250], [8], [30, 100], [1], ["cyc_word_embeddings_serial", "cyc_word_embeddings_serial_shuffle"]);
