@@ -20,18 +20,19 @@
 #define TEXT_CLASSIFICATION_FILE "dry-run_lshtc_dataset/Task1_Train:CrawlData_Test:CrawlData/train.txt"
 #define N_COORDS 51033
 #define N_CATEGORIES 1139
-#define N_DATAPOINTS 4463
+#define N_CATEGORIES_CACHE_ALIGNED (12294 / 8 + 1) * 8
+#define N_DATAPOINT 4463
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 10
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 500 //full 80 mb
+#define BATCH_SIZE 550 //full 80 mb
 #endif
 
 #ifndef HOG
@@ -63,11 +64,10 @@
 #endif
 
 double GAMMA = START_GAMMA;
-double GAMMA_REDUCTION = .9;
+double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double ** prev_gradients[NTHREAD];
 double ** model;
 
 double thread_load_balance[NTHREAD];
@@ -129,10 +129,10 @@ double compute_loss(vector<DataPoint> &points) {
   return -loss / points.size();
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
-
+void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
   pin_to_core(thread_id);
 
+  double probs[N_CATEGORIES];
   for (int batch = 0; batch < access_length.size(); batch++) {
     
     //Wait for all threads to be on the same batch
@@ -149,34 +149,30 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	}
       }
     }
-
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
 
-      //Compute gradient
       DataPoint p = access_pattern[batch_index_start[batch]+i];
       int chosen_category = p.first;
       vector<pair<int, double> > sparse_array = p.second;
       int indx = batch_index_start[batch]+i;
       int update_order = order[indx];
-      
-      double probs[N_CATEGORIES];
 
       //compute probabilities
       compute_probs(p, probs);
-
-      //Do gradient descent
+      
+      /*//Do gradient descent
       for (int j = 0; j < sparse_array.size(); j++) {
 	for (int k = 0; k < N_CATEGORIES; k++) {
 	  int is_correct = (k == chosen_category) ? 1 : 0;
 	  model[j][k] -= GAMMA * (-sparse_array[j].second * (is_correct - probs[k]));
 	}
-      }
+	}*/
     }
-  } 
-}
+  }
+} 
 
-void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
+void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &access_pattern, vector<vector<int> > &access_length, vector<vector<int> > &batch_index_start, int batchnum, vector<DataPoint> &points, vector<vector<int> > &order) {
   
   int * chosen_threads = (int *)malloc(sizeof(int) * ccs.size());
   int total_size_needed[NTHREAD];
@@ -185,8 +181,10 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
 
   for (int i = 0; i < NTHREAD; i++) {
     total_size_needed[i] = 0;
-    balances.push_back(pair<int, int>(i, 0));
+    balances.push_back(pair<int, int>(i, thread_load_balance[i]));
   }
+
+  make_heap(balances.begin(), balances.end(), Comp());
 
   //Count total size needed for each access pattern
   double max_cc_size = 0, avg_cc_size = 0;
@@ -208,35 +206,12 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
   int index_count[NTHREAD];
   int max_load = 0;
   for (int i = 0; i < NTHREAD; i++) {
-    //int numa_node = i % 2;
-    int numa_node = core_to_node[i];
 
+    size_t new_size = (size_t)total_size_needed[i] + cur_datapoints_used[i];
     batch_index_start[i][batchnum] = cur_datapoints_used[i];
-    if (cur_bytes_allocated[i] == 0) {
-      size_t new_size = (size_t)total_size_needed[i] * sizeof(DataPoint);
-      new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
-      access_pattern[i] = (DataPoint *)numa_alloc_onnode(new_size, numa_node);
-      cur_bytes_allocated[i] = new_size;
-    }
-    else {
-      if ((cur_datapoints_used[i] + total_size_needed[i])*sizeof(DataPoint) >=
-	  cur_bytes_allocated[i]) {
-	size_t old_size = (size_t)(cur_bytes_allocated[i]);
-	size_t new_size = (size_t)((cur_datapoints_used[i] + total_size_needed[i]) * sizeof(DataPoint));
-	//Round new size to next page length 
-	new_size = ((new_size / numa_pagesize()) + 1) * numa_pagesize();
-	
-	access_pattern[i] = (DataPoint *)numa_realloc(access_pattern[i], old_size, new_size);
-	cur_bytes_allocated[i] = new_size;
-      }
-    }
+    access_pattern[i].resize(new_size);
     cur_datapoints_used[i] += total_size_needed[i];
     order[i].resize(cur_datapoints_used[i]);
-    if (access_pattern[i] == NULL) {
-      cout << "OOM" << endl;
-      exit(0);
-    }
-      
     access_length[i][batchnum] = total_size_needed[i];
     index_count[i] = 0;
     thread_load_balance[i] += total_size_needed[i];
@@ -333,9 +308,9 @@ vector<DataPoint> get_text_classification_data() {
     labels.insert(label);
   }
 
-  //cout << "NUMBER OF COORDS: " << coords.size() << endl;
-  //cout << "NUMBER OF LABELS: " << labels.size() << endl; 
-  //cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
+  cout << "NUMBER OF COORDS: " << coords.size() << endl;
+  cout << "NUMBER OF LABELS: " << labels.size() << endl; 
+  cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
   return datapoints;
 }
 
@@ -359,7 +334,7 @@ void cyc_text_classification() {
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
 
   //Access pattern of form [thread][batch][point_ids]
-  vector<DataPoint *> access_pattern(NTHREAD);
+  vector<vector<DataPoint> > access_pattern(NTHREAD);
   //Access length (number of elements in corresponding cc)
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int > > batch_index_start(NTHREAD);
@@ -373,15 +348,17 @@ void cyc_text_classification() {
 
   //CC Parallel
   map<int, vector<int> > CCs[n_batches];
-#pragma omp parallel for
+  //#pragma omp parallel for
   for (int i = 0; i < n_batches; i++) {
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
     compute_CC_thread(CCs[i], points, start, end, omp_get_thread_num());
   }
+
   for (int i = 0; i < n_batches; i++) {
     distribute_ccs(CCs[i], access_pattern, access_length, batch_index_start, i, points, order);
   }
+  //exit(0);
 
   //Perform cyclades
   float copy_time = 0;
@@ -394,11 +371,11 @@ void cyc_text_classification() {
     }
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -490,7 +467,7 @@ int main(void) {
 
   model = (double **)malloc(sizeof(double *) * N_COORDS);
   for (int i = 0; i < N_COORDS; i++) {
-    model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES);
+    model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
   }
 
   //Create a map from core/thread -> node
@@ -519,4 +496,6 @@ int main(void) {
   if (CYC) {
     cyc_text_classification();
   }
+  for (int i = 0; i < NTHREAD; i++)
+    cout << thread_load_balance[i] << endl;
 }
