@@ -27,11 +27,11 @@
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 5
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 1000 //full 80 mb
+#define BATCH_SIZE 500 //full 80 mb
 #endif
 
 #ifndef HOG
@@ -59,11 +59,11 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-11 // SGD
+#define START_GAMMA 3e-11 // SGD
 #endif
 
 double GAMMA = START_GAMMA;
-double GAMMA_REDUCTION = 1;
+double GAMMA_REDUCTION = .9;
 
 int volatile thread_batch_on[NTHREAD];
 
@@ -333,9 +333,9 @@ vector<DataPoint> get_text_classification_data() {
     labels.insert(label);
   }
 
-  cout << "NUMBER OF COORDS: " << coords.size() << endl;
-  cout << "NUMBER OF LABELS: " << labels.size() << endl; 
-  cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
+  //cout << "NUMBER OF COORDS: " << coords.size() << endl;
+  //cout << "NUMBER OF LABELS: " << labels.size() << endl; 
+  //cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
   return datapoints;
 }
 
@@ -387,7 +387,6 @@ void cyc_text_classification() {
   float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-    cout << compute_loss(points) << endl;
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
       cout << compute_loss(points) << " " << overall.elapsed()-copy_time << " " << gradient_time.elapsed()-copy_time << endl;
@@ -418,13 +417,13 @@ void cyc_text_classification() {
 }
 
 void hog_text_classification() {
-  /*vector<DataPoint> points = get_text_classification_data();
+  vector<DataPoint> points = get_text_classification_data();
   initialize_model();
   random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Hogwild access pattern construction
-  vector<DataPoint *> access_pattern(NTHREAD);
+  vector<vector<DataPoint> > access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int> > batch_index_start(NTHREAD);
   vector<vector<int> > order(NTHREAD);
@@ -441,25 +440,13 @@ void hog_text_classification() {
     int end = min(i * n_points_per_thread + n_points_per_thread, (int)points.size());
 
     batch_index_start[i][0] = 0;
-    access_pattern[i] = (DataPoint *)malloc(sizeof(DataPoint) * n_points_per_thread);
+    access_pattern[i].resize(n_points_per_thread);
     order[i].resize(n_points_per_thread);
     for (int j = start; j < end; j++) {
       access_pattern[i][j-start] = points[j];
       order[i][j-start] = j+1;
     }
     access_length[i][0] = n_points_per_thread;
-  }
-
-  for (int i = 0; i < NTHREAD; i++) {
-    prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
-    C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
-    for (int j = 0; j < order[i].size(); j++) {
-      C_sum_mult[i][j] = 0;
-      prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
-      for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
-	prev_gradients[i][j][k] = 0;
-      }
-    }
   }
 
   //Divide to threads
@@ -475,38 +462,23 @@ void hog_text_classification() {
     //cout << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, i);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, ref(access_pattern[j]), ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
       }
     }
-    clear_bookkeeping();
-    
-    double c_gradient = 0;
-#pragma omp parallel for reduction(+:c_gradient)
-    for (int t = 0; t < NTHREAD; t++) {
-      for (int d = 0; d < order[t].size(); d++) {
-	c_gradient += -C_sum_mult[t][d];
-      }
-    }
-    C -= GAMMA * c_gradient;
-
     GAMMA *= GAMMA_REDUCTION;
   }
-
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
     cout << gradient_time.elapsed() << endl;
     cout << compute_loss(points) << endl;
   }
-  else {
-    //print_loss_for_records(points);
-    }*/
 }
 
 int main(void) {

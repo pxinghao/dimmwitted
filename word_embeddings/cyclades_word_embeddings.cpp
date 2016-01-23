@@ -31,7 +31,7 @@
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 200000
+#define N_EPOCHS 200
 #endif 
 
 #ifndef BATCH_SIZE
@@ -49,7 +49,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
