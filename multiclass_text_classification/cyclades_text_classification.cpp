@@ -23,17 +23,15 @@
 #define N_DATAPOINTS 4463
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 50
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 4250 //full 80 mb
-//#define BATCH_SIZE 2000 //1/10 of 80 mb SGD
-//#define BATCH_SIZE 490
+#define BATCH_SIZE 1000 //full 80 mb
 #endif
 
 #ifndef HOG
@@ -61,9 +59,7 @@
 #endif
 
 #ifndef START_GAMMA
-//#define START_GAMMA 2.3e-4//3.42e-5
-//#define START_GAMMA 9e-6 // SAG
-#define START_GAMMA 1e-11 // SGD
+#define START_GAMMA 2e-11 // SGD
 #endif
 
 double GAMMA = START_GAMMA;
@@ -287,7 +283,7 @@ void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, i
     int src = i-start;
     int src_group = union_find(src, tree);
     for (int k = 0; k < touched_coords.size(); k++) {
-      int element = touched_coords[k].first + end-start;
+      int element = union_find(touched_coords[k].first + end-start, tree);
       tree[element] = src_group;
     }
   }
