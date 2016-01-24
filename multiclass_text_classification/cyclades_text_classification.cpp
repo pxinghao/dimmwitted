@@ -17,7 +17,7 @@
 #include <omp.h>
 #include <cmath>
 
-#define TEXT_CLASSIFICATION_FILE "dry-run_lshtc_dataset/Task1_Train:CrawlData_Test:CrawlData/train.txt"
+#define TEXT_CLASSIFICATION_FILE "filtered"
 #define N_COORDS 51033
 #define N_CATEGORIES 1139
 #define N_CATEGORIES_CACHE_ALIGNED (12294 / 8 + 1) * 8
@@ -161,13 +161,13 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
       //compute probabilities
       compute_probs(p, probs);
       
-      /*//Do gradient descent
+      //Do gradient descent
       for (int j = 0; j < sparse_array.size(); j++) {
 	for (int k = 0; k < N_CATEGORIES; k++) {
 	  int is_correct = (k == chosen_category) ? 1 : 0;
 	  model[j][k] -= GAMMA * (-sparse_array[j].second * (is_correct - probs[k]));
 	}
-	}*/
+      }
     }
   }
 } 
