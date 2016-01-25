@@ -17,14 +17,14 @@
 #include <omp.h>
 #include <cmath>
 
-#define TEXT_CLASSIFICATION_FILE "filtered"
-#define N_COORDS 51033
-#define N_CATEGORIES 1139
-#define N_CATEGORIES_CACHE_ALIGNED (12294 / 8 + 1) * 8
-#define N_DATAPOINT 4463
+#define TEXT_CLASSIFICATION_FILE "small_filtered"
+#define N_COORDS 324616
+#define N_CATEGORIES 8432
+#define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
+#define N_DATAPOINT 80000
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 16
 #endif
 
 #ifndef N_EPOCHS
@@ -32,7 +32,7 @@
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 550 //full 80 mb
+#define BATCH_SIZE 50
 #endif
 
 #ifndef HOG
@@ -99,8 +99,9 @@ void compute_probs(DataPoint &p, double *probs) {
   vector<pair<int, double> > sparse_array = p.second;
 
   //Clear probs
-  for (int j = 0; j < N_CATEGORIES; j++) 
-    probs[j] = 0;
+  //for (int j = 0; j < N_CATEGORIES; j++) 
+  //probs[j] = 0;
+  memset(probs, 0, sizeof(double) * N_CATEGORIES);
   
   //x^t A_i
   for (int j = 0; j < sparse_array.size(); j++) {
@@ -158,14 +159,27 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
       int indx = batch_index_start[batch]+i;
       int update_order = order[indx];
 
-      //compute probabilities
-      compute_probs(p, probs);
+      //Clear probs
+      memset(probs, 0, sizeof(double) * N_CATEGORIES);
+
+      double sum_prob = 0;
+      
+      //x^t A_i
+      for (int j = 0; j < sparse_array.size(); j++) {
+	for (int k = 0; k < N_CATEGORIES; k++) {
+	  probs[k] += model[sparse_array[j].first][k] * sparse_array[j].second;
+	}
+      }
+      for (int j = 0; j < N_CATEGORIES; j++) {
+	probs[j] = exp(probs[j]);
+	sum_prob += probs[j];
+      }
       
       //Do gradient descent
       for (int j = 0; j < sparse_array.size(); j++) {
 	for (int k = 0; k < N_CATEGORIES; k++) {
-	  int is_correct = (k == chosen_category) ? 1 : 0;
-	  model[j][k] -= GAMMA * (-sparse_array[j].second * (is_correct - probs[k]));
+	  int is_correct = k == chosen_category;
+	  model[sparse_array[j].first][k] -= GAMMA * (-sparse_array[j].second * (is_correct - probs[k]/sum_prob));
 	}
       }
     }
@@ -181,7 +195,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
 
   for (int i = 0; i < NTHREAD; i++) {
     total_size_needed[i] = 0;
-    balances.push_back(pair<int, int>(i, thread_load_balance[i]));
+    balances.push_back(pair<int, int>(i, 0));
   }
 
   make_heap(balances.begin(), balances.end(), Comp());
@@ -195,12 +209,22 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
     pop_heap(balances.begin(), balances.end(), Comp()); balances.pop_back();
     vector<int> cc = it->second;
     total_size_needed[chosen_thread] += cc.size();
-    best_balance.second += cc.size();
+
+    //best_balance.second += cc.size();
+    int num_coords = 0;
+    for (int i = 0; i < cc.size(); i++) num_coords += points[cc[i]].second.size();
+    best_balance.second += num_coords;
+    
     balances.push_back(best_balance); push_heap(balances.begin(), balances.end(), Comp());
     max_cc_size = max(max_cc_size, (double) cc.size());
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
+
+  for (int i = 0; i < balances.size(); i++) {
+    cout << balances[i].second << " ";
+  }
+  cout << endl;
 
   //Allocate memory
   int index_count[NTHREAD];
@@ -283,6 +307,7 @@ vector<DataPoint> get_text_classification_data() {
     linestream >> label;
     string coord_freq_str, coord_str, freq_str;
     vector<pair<int, double> > coord_freq_pairs;
+    int num_coords_encountered = 0;
     while (linestream >> coord_freq_str) {
       stringstream coord_freq_stream(coord_freq_str);
       getline(coord_freq_stream, coord_str, ':');

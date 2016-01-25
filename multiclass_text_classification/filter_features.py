@@ -1,7 +1,7 @@
 import sys
 
-filename = "dry-run_lshtc_dataset/Task1_Train:CrawlData_Test:CrawlData/train.txt"
-FREQ_LIM = .001
+filename = "trainDmoz.txt"
+FREQ_LIM = .01
 
 f = open(filename)
 vectors = []

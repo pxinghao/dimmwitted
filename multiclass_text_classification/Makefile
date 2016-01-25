@@ -50,7 +50,7 @@ cyc_text_classification_cyc:
 	./text_classification_cyc
 
 cyc_text_classification_cyc_batch_tune:
-	@for number in 1000 1250 1500 1750 2000 2250 2500 2750 3000 3250 3500 3750 4000 4250 4500 4750; do\
+	@for number in 1000 1500 2000 2500 3000 3200 3400 3600 3800 4000 4200 4400 4600 4800 5000 5200 5400 5600 5800 6000 6200 6400 6600 6800 7000 7200 7400 7600 7800 8000 8200 8400 8600 8800 9000 9200 9400 9600 9800; do\
 		echo Batch Size = $$number ; \
 		g++ -fopenmp -Ofast -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread -DCYC=1 -DBATCH_SIZE=$$number -o tune_batch; \
 		./tune_batch; \
