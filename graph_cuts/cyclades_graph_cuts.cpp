@@ -14,29 +14,33 @@
 #include <sched.h>
 #include <omp.h>
 
-//#define GRAPH_CUTS_FILE "liver.n6c10.max"
-//#define N_NODES 4161602 + 1 //liver dataset
-//#define N_DATAPOINTS 25138821 //liver dataset
+//#define GRAPH_CUTS_FILE "BVZ-sawtooth0.max"
+//#define N_NODES 164922 + 1 
+//#define N_DATAPOINTS 795290
 
-#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
-#define N_NODES 110594 + 1 //tsukuba dataset
-#define N_DATAPOINTS 514483 //tsukuba dataset
+#define GRAPH_CUTS_FILE "liver.n6c10.max"
+#define N_NODES 4161602 + 1 //liver dataset
+#define N_DATAPOINTS 25138821 //liver dataset
+
+//#define GRAPH_CUTS_FILE "BVZ-tsukuba0.max"
+//#define N_NODES 110594 + 1 //tsukuba dataset
+//#define N_DATAPOINTS 514483 //tsukuba dataset
 
 #ifndef PARALLEL_CC
-#define PARALLEL_CC 0
+#define PARALLEL_CC 1
 #endif
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 20
 #endif
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 2600000
-//#define BATCH_SIZE 2500000
-#define BATCH_SIZE 200
+#define BATCH_SIZE 1000000
+//#define BATCH_SIZE 7952
 #endif
 
 #ifndef HOG
@@ -48,7 +52,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -65,14 +69,19 @@
 #endif 
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
+#ifndef SAGA
+#define SAGA 0
+#endif
+
 //double GAMMA = 5e-8;
-double GAMMA = 8e-5;
+double GAMMA = 8e-10;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
 double sum_gradients[N_NODES][K_TO_CACHELINE]  __attribute__((aligned(64)));
-double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE]  __attribute__((aligned(64)));
+//double prev_gradients[N_DATAPOINTS][2][K_TO_CACHELINE]  __attribute__((aligned(64)));
+double ***prev_gradients;
 double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double **sum_gradients, **prev_gradients, **model;
 double **model_records[N_EPOCHS];
@@ -154,9 +163,11 @@ void update_coords() {
 }
 
 void clear_bookkeeping() {
-  update_coords();
-  for (int i = 0; i < N_NODES; i++) {
-    bookkeeping[i] = 0;
+  if (SAGA) {
+    update_coords();
+    for (int i = 0; i < N_NODES; i++) {
+      bookkeeping[i] = 0;
+    }
   }
 }
 
@@ -249,13 +260,12 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       int diff_x = update_order - bookkeeping[x] - 1;
       int diff_y = update_order - bookkeeping[y] - 1;
 
-      for (int j = 0; j < K; j++) {	
+      if (SAGA) {
+	for (int j = 0; j < K; j++) {	
 	  model[x][j] -=  GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
+	}
       }
-
-      //project_constraint((double *)model[x]);
-      //project_constraint((double *)model[y]);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -263,26 +273,32 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	if (model[x][j] - model[y][j] < 0) gradient = -r;
 	else gradient = r;
 	
-	if (should_update_y) {
-	  //model[y][j] -= GAMMA * gradient * -1;
-	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[update_order-1][1][j] + sum_gradients[y][j]) / N_DATAPOINTS;
-	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[update_order-1][1][j]); 
-	  prev_gradients[update_order-1][1][j] = gradient * -1;
+	if (SAGA) {
+	  model[y][j] -= GAMMA * (gradient *-1 - prev_gradients[update_order-1][1][j] + sum_gradients[y][j]) / N_DATAPOINTS * should_update_y;
+	  sum_gradients[y][j] += (gradient * -1 - prev_gradients[update_order-1][1][j]) * should_update_y; 
+	  prev_gradients[update_order-1][1][j] = gradient * -1 * should_update_y;
 	}
-	if (should_update_x) {
-	  //model[x][j] -= GAMMA * gradient;
-	  model[x][j] -= GAMMA * (gradient - prev_gradients[update_order-1][0][j] + sum_gradients[x][j]) / N_DATAPOINTS;
-	  sum_gradients[x][j] += (gradient - prev_gradients[update_order-1][0][j]);
-	  prev_gradients[update_order-1][0][j] = gradient;
+	else {
+	  model[y][j] -= GAMMA * gradient * -1 * should_update_y;
+	}
+	if (SAGA) {
+	  model[x][j] -= GAMMA * (gradient - prev_gradients[update_order-1][0][j] + sum_gradients[x][j]) / N_DATAPOINTS * should_update_x;
+	  sum_gradients[x][j] += (gradient - prev_gradients[update_order-1][0][j]) * should_update_x;
+	  prev_gradients[update_order-1][0][j] = gradient * should_update_x;
+	}
+	else {
+	  model[x][j] -= GAMMA * gradient * should_update_x;
 	}
       }
-      //Update bookkeeping
-      bookkeeping[x] = update_order;
-      bookkeeping[y] = update_order;
 
+      if (SAGA) {
+	//Update bookkeeping
+	bookkeeping[x] = update_order;
+	bookkeeping[y] = update_order;	
+      }
       //Projections
-      //project_constraint((double *)&model[x]);
-      //project_constraint((double *)&model[y]);
+      project_constraint_2((double *)&model[x]);
+      project_constraint_2((double *)&model[y]);
     }
   }
 }
@@ -315,6 +331,11 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
     avg_cc_size += cc.size();
   }
   avg_cc_size /= (double)ccs.size();
+  
+  for (int i = 0; i < balances.size(); i++) {
+    //cout << balances[i].second << " ";
+  }
+  //cout << endl;
 
   //Allocate memory
   int index_count[NTHREAD];
@@ -458,10 +479,12 @@ vector<DataPoint> get_graph_cuts_data() {
 }
 
 void initialize_model() {
-  for (int i = 0; i < N_DATAPOINTS; i++) {
-    for (int j = 0; j < 2; j++) {
-      for (int k = 0; k < K; k++) {
-	prev_gradients[i][j][k] = 0;
+  if (SAGA) {
+    for (int i = 0; i < N_DATAPOINTS; i++) {
+      for (int j = 0; j < 2; j++) {
+	for (int k = 0; k < K; k++) {
+	  prev_gradients[i][j][k] = 0;
+	}
       }
     }
   }
@@ -483,7 +506,7 @@ void cyc_graph_cuts() {
   vector<DataPoint> points = get_graph_cuts_data();
   initialize_model();
 
-  //random_shuffle(points.begin(), points.end());
+  random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Access pattern generation
@@ -532,10 +555,16 @@ void cyc_graph_cuts() {
   for (int i = 0; i < ts.size(); i++) ts[i].join();
 
   //Perform cyclades
+  float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
     //if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_timer;
+      //cout << compute_loss(points) << " " << overall.elapsed()-copy_time << " " << gradient_time.elapsed()-copy_time << endl;
+      copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);
+      copy_time += copy_timer.elapsed();
+    }
     //cout << i << " " << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
@@ -562,7 +591,7 @@ void cyc_graph_cuts() {
     cout << compute_loss(points) << endl;
   }
   else {
-    //print_loss_for_records(points);
+    print_loss_for_records(points);
   }
 }
 
@@ -599,11 +628,19 @@ void hog_graph_cuts() {
   }
 
   //Divide to threads
+  float copy_time;
   Timer gradient_time;
 
   for (int i = 0; i < N_EPOCHS; i++) {
     //if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) copy_model_to_records(i, overall.elapsed(), gradient_time.elapsed());
-    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
+    //if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) cout << compute_loss(points) << " " << overall.elapsed() << " " << gradient_time.elapsed() << endl;
+    if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+      Timer copy_timer;
+      //cout << compute_loss(points) << " " << overall.elapsed()-copy_time << " " << gradient_time.elapsed()-copy_time << endl;
+      copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);
+      copy_time += copy_timer.elapsed();
+    }
+
     vector<thread> threads;
     if (NTHREAD == 1) {
       do_cyclades_gradient_descent_with_points(access_pattern[0], access_length[0], batch_index_start[0], order[0], 0, i);
@@ -626,14 +663,14 @@ void hog_graph_cuts() {
     cout << compute_loss(points) << endl;
   }
   else {
-    //print_loss_for_records(points);
+    print_loss_for_records(points);
   }
 }
 
 int main(void) {
   std::cout << std::fixed << std::showpoint;
   std::cout << std::setprecision(20);
-  srand(100);
+  srand(0);
   pin_to_core(0);
 
   //Create a map from core/thread -> node
@@ -681,14 +718,14 @@ int main(void) {
     workk[i] = 0;
   }
   
-  /*if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
+  if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     for (int i = 0; i < N_EPOCHS; i++) {
       model_records[i] = (double **)malloc(sizeof(double *) * N_NODES);
       for (int j = 0; j < N_NODES; j++) {
 	model_records[i][j] = (double *)malloc(sizeof(double) * K);
       }
     }
-    }*/
+  }
   if (HOG) {
     hog_graph_cuts();
   }
