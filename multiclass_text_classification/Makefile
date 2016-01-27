@@ -3,33 +3,32 @@ BATCH_SIZE=200
 NTHREAD=8
 SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=0
 
-cyc_text_classification_hog_sag_compile:
+cyc_text_classification_hog_saga_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread -o text_classification_hog \
-	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAG=1 
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=1 
 
-cyc_text_classification_hog_sag_run:
+cyc_text_classification_hog_saga_run:
 	@./text_classification_hog
 
 cyc_text_classification_hog_sgd_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread -o text_classification_hog \
-	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAG=0 
-
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=0
 cyc_text_classification_hog_sgd_run:
 	@./text_classification_hog
 
-cyc_text_classification_cyc_sag_compile:
+cyc_text_classification_cyc_saga_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread -o text_classification_cyc_sag \
-	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAG=1 
-cyc_text_classification_cyc_sag_run:
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1 
+cyc_text_classification_cyc_saga_run:
 	@./text_classification_cyc_sag
 
 cyc_text_classification_cyc_sag2_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread -o text_classification_cyc_sag \
-	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAG=1 
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1 
 cyc_text_classification_cyc_sag2_run:
 	@./text_classification_cyc_sag
 

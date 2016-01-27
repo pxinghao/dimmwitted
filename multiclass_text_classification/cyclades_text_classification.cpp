@@ -17,30 +17,29 @@
 #include <omp.h>
 #include <cmath>
 
-/*#define TEXT_CLASSIFICATION_FILE "random_lines_filtered"
+#define TEXT_CLASSIFICATION_FILE "random_lines_filtered"
 #define N_COORDS 411896
 #define N_CATEGORIES 2
 #define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
-#define N_DATAPOINT 120132*/
+#define N_DATAPOINT 120132
 
-#define TEXT_CLASSIFICATION_FILE "random_lines_filtered_filtered"
+/*#define TEXT_CLASSIFICATION_FILE "random_lines_filtered_filtered"
 #define N_COORDS 819
 #define N_CATEGORIES 2
 #define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
-#define N_DATAPOINT 100
+#define N_DATAPOINT 100*/
 
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 1000
 #endif 
 
 #ifndef BATCH_SIZE
-//#define BATCH_SIZE 400
-#define BATCH_SIZE 1
+#define BATCH_SIZE 400
 #endif
 
 #ifndef HOG
@@ -52,7 +51,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -68,7 +67,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 1e-3 // SAGA
+#define START_GAMMA .1 // SAGA
 //#define START_GAMMA 2 // SGD
 #endif
 
@@ -401,7 +400,7 @@ void cyc_text_classification() {
   vector<DataPoint> points = get_text_classification_data();
 
   initialize_model();
-  //random_shuffle(points.begin(), points.end());
+  random_shuffle(points.begin(), points.end());
 
   Timer overall;
 
