@@ -56,3 +56,7 @@ cyc_text_classification_cyc_batch_tune:
 		./tune_batch; \
 	done
 
+cyc_text_classification_serial:
+	rm -rf text_classification_cyc_serial
+	g++ -Ofast -fopenmp -std=c++11  cyclades_text_classification_serial.cpp -lnuma -lpthread -DCYC=1 -o text_classification_cyc_serial
+	./text_classification_cyc_serial

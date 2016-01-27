@@ -1,15 +1,15 @@
 import sys
 
-filename = "trainDmoz.txt"
-FREQ_LIM = .01
+filename = sys.argv[1]
+FREQ_LIM = float(sys.argv[2])
 
 f = open(filename)
 vectors = []
 coord_count = {}
 for line in f:
     values = line.strip().split()
-    category = int(values[0])
-    tf = [[int(y) for y in x.split(":")] for x in values[1:]]
+    category = int(float(values[0]))
+    tf = [[float(y) for y in x.split(":")] for x in values[1:]]
     for coord, freq in tf:
         if coord not in coord_count:
             coord_count[coord] = 0

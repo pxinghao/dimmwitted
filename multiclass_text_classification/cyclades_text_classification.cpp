@@ -17,14 +17,21 @@
 #include <omp.h>
 #include <cmath>
 
-#define TEXT_CLASSIFICATION_FILE "small_filtered"
-#define N_COORDS 324616
-#define N_CATEGORIES 8432
+/*#define TEXT_CLASSIFICATION_FILE "random_lines_filtered"
+#define N_COORDS 411896
+#define N_CATEGORIES 2
 #define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
-#define N_DATAPOINT 80000
+#define N_DATAPOINT 120132*/
+
+#define TEXT_CLASSIFICATION_FILE "random_lines_filtered_filtered"
+#define N_COORDS 819
+#define N_CATEGORIES 2
+#define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
+#define N_DATAPOINT 100
+
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
@@ -32,7 +39,8 @@
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 50
+//#define BATCH_SIZE 400
+#define BATCH_SIZE 1
 #endif
 
 #ifndef HOG
@@ -44,7 +52,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -55,12 +63,13 @@
 #define SHOULD_SYNC 1
 #endif
 
-#ifndef SAG
-#define SAG 0
+#ifndef SAGA
+#define SAGA 1
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 3e-11 // SGD
+#define START_GAMMA 1e-3 // SAGA
+//#define START_GAMMA 2 // SGD
 #endif
 
 double GAMMA = START_GAMMA;
@@ -68,7 +77,10 @@ double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-double ** model;
+//double ** prev_gradients[NTHREAD];
+double prev_gradients[N_DATAPOINT][N_COORDS][N_CATEGORIES];
+double ** model, **sum_gradients;
+int bookkeeping[N_COORDS];
 
 double thread_load_balance[NTHREAD];
 size_t cur_bytes_allocated[NTHREAD];
@@ -150,6 +162,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	}
       }
     }
+    
     //For every data point in the connected component
     for (int i = 0; i < access_length[batch]; i++) {
 
@@ -159,28 +172,50 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
       int indx = batch_index_start[batch]+i;
       int update_order = order[indx];
 
-      //Clear probs
-      memset(probs, 0, sizeof(double) * N_CATEGORIES);
-
-      double sum_prob = 0;
-      
-      //x^t A_i
-      for (int j = 0; j < sparse_array.size(); j++) {
-	for (int k = 0; k < N_CATEGORIES; k++) {
-	  probs[k] += model[sparse_array[j].first][k] * sparse_array[j].second;
+      if (SAGA) {
+	for (int k = 0; k < sparse_array.size(); k++) {
+	  for (int j = 0; j < N_CATEGORIES; j++) {
+	    double diff = update_order - bookkeeping[sparse_array[k].first] - 1; 
+	    model[sparse_array[k].first][j] -= GAMMA * sum_gradients[sparse_array[k].first][j] * diff / N_DATAPOINT;
+	  }
 	}
       }
-      for (int j = 0; j < N_CATEGORIES; j++) {
-	probs[j] = exp(probs[j]);
-	sum_prob += probs[j];
+
+      
+      for (int i = 0; i < sparse_array.size(); i++) {
+	for (int j = 0; j < N_CATEGORIES; j++) {
+	  //cout << prev_gradients[pt_index][first_coord][j] << endl;
+	  //cout << sum_gradients[first_coord][j] << endl;
+	  //cout << sparse_array[i].first << endl;
+	  //cout << model[sparse_array[i].first][j] << endl;
+	  //cout << model[second_coord][j] << endl;
+	}
       }
+
+      //Clear probs
+      compute_probs(p, probs);
       
       //Do gradient descent
       for (int j = 0; j < sparse_array.size(); j++) {
 	for (int k = 0; k < N_CATEGORIES; k++) {
-	  int is_correct = k == chosen_category;
-	  model[sparse_array[j].first][k] -= GAMMA * (-sparse_array[j].second * (is_correct - probs[k]/sum_prob));
+	  int is_correct = k == chosen_category ? 1 : 0;
+	  double gradient = (-sparse_array[j].second * (is_correct - probs[k]));
+	  if (SAGA) {
+	    /*model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j+k] + 
+							sum_gradients[sparse_array[j].first][k] / N_DATAPOINT);
+	    sum_gradients[sparse_array[j].first][k] += gradient - prev_gradients[thread_id][indx][j+k];
+	    prev_gradients[thread_id][indx][j+k] = gradient;*/
+
+	    model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[update_order-1][sparse_array[j].first][k] + 
+							sum_gradients[sparse_array[j].first][k] / N_DATAPOINT);
+	    sum_gradients[sparse_array[j].first][k] += gradient -  prev_gradients[update_order-1][sparse_array[j].first][k];
+	    prev_gradients[update_order-1][sparse_array[j].first][k] = gradient;
+	  }
+	  else {
+	    model[sparse_array[j].first][k] -= GAMMA * gradient;
+	  }
 	}
+	bookkeeping[sparse_array[j].first] = update_order;
       }
     }
   }
@@ -209,7 +244,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
     pop_heap(balances.begin(), balances.end(), Comp()); balances.pop_back();
     vector<int> cc = it->second;
     total_size_needed[chosen_thread] += cc.size();
-
+    
     //best_balance.second += cc.size();
     int num_coords = 0;
     for (int i = 0; i < cc.size(); i++) num_coords += points[cc[i]].second.size();
@@ -222,10 +257,10 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   avg_cc_size /= (double)ccs.size();
 
   for (int i = 0; i < balances.size(); i++) {
-    cout << balances[i].second << " ";
+    //cout << balances[i].second << " ";
   }
-  cout << endl;
-
+  //cout << endl;
+  
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -303,7 +338,7 @@ vector<DataPoint> get_text_classification_data() {
   while (getline(in, s)) {
     if (s.size() == 0) continue;
     stringstream linestream(s);
-    int label;
+    double label;
     linestream >> label;
     string coord_freq_str, coord_str, freq_str;
     vector<pair<int, double> > coord_freq_pairs;
@@ -326,10 +361,10 @@ vector<DataPoint> get_text_classification_data() {
     }
 
     //Remap labesl to prevent gaps
-    if (label_map.find(label) == label_map.end()) 
-      label_map[label] = labels.size();
+    if (label_map.find((int)label) == label_map.end()) 
+      label_map[(int)label] = labels.size();
 
-    datapoints.push_back(DataPoint(label_map[label], coord_freq_pairs));
+    datapoints.push_back(DataPoint(label_map[(int)label], coord_freq_pairs));
     labels.insert(label);
   }
 
@@ -347,11 +382,29 @@ void initialize_model() {
   }
 }
 
+void update_coords() {
+  for (int i = 0; i < N_COORDS; i++) {
+    double diff = N_DATAPOINT - bookkeeping[i];
+    for (int j = 0; j < N_CATEGORIES; j++) {
+      model[i][j] -= GAMMA * diff * sum_gradients[i][j] / N_DATAPOINT;
+    }
+  }
+}
+
+void clear_bookkeeping() {
+  if (SAGA) {
+    update_coords();
+    for (int i = 0; i < N_COORDS; i++) {
+      bookkeeping[i] = 0;
+    }
+  }
+}
+
 void cyc_text_classification() {
   vector<DataPoint> points = get_text_classification_data();
 
   initialize_model();
-  random_shuffle(points.begin(), points.end());
+  //random_shuffle(points.begin(), points.end());
 
   Timer overall;
 
@@ -385,6 +438,17 @@ void cyc_text_classification() {
   }
   //exit(0);
 
+  /*for (int i = 0; i < NTHREAD; i++) {
+    prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
+    for (int j = 0; j < thread_load_balance[i]; j++) {
+      int size = access_pattern[i][j].second.size();
+      prev_gradients[i][j] = (double *)malloc(sizeof(double) * size * N_CATEGORIES);
+      for (int k = 0; k < size * N_CATEGORIES; k++) {
+	prev_gradients[i][j][k] = 0;
+      }
+    }
+    }*/
+
   //Perform cyclades
   float copy_time = 0;
   Timer gradient_time;
@@ -410,6 +474,7 @@ void cyc_text_classification() {
       }
     }
     GAMMA *= GAMMA_REDUCTION;    
+    clear_bookkeeping();
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -451,6 +516,17 @@ void hog_text_classification() {
     access_length[i][0] = n_points_per_thread;
   }
 
+  /*for (int i = 0; i < NTHREAD; i++) {
+    prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
+    for (int j = 0; j < order[i].size(); j++) {
+      int size = access_pattern[i][j].second.size();
+      prev_gradients[i][j] = (double *)malloc(sizeof(double) * size * N_CATEGORIES);
+      for (int k = 0; k < size * N_CATEGORIES; k++) {
+	prev_gradients[i][j][k] = 0;
+      }
+    }
+    }*/
+
   //Divide to threads
   float copy_time = 0;
   Timer gradient_time;
@@ -475,6 +551,7 @@ void hog_text_classification() {
       }
     }
     GAMMA *= GAMMA_REDUCTION;
+    clear_bookkeeping();
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -490,9 +567,18 @@ int main(void) {
   std::cout << std::setprecision(20);
   pin_to_core(0);
 
+  sum_gradients = (double **)malloc(sizeof(double *) * N_COORDS);
   model = (double **)malloc(sizeof(double *) * N_COORDS);
   for (int i = 0; i < N_COORDS; i++) {
     model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
+    sum_gradients[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
+  }
+
+  for (int i = 0; i < N_COORDS; i++) {
+    bookkeeping[i] = 0;
+    for (int j = 0; j < N_CATEGORIES_CACHE_ALIGNED; j++) {
+      sum_gradients[i][j] = 0;
+    }
   }
 
   //Create a map from core/thread -> node
