@@ -77,8 +77,8 @@ double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
-//double ** prev_gradients[NTHREAD];
-double prev_gradients[N_DATAPOINT][N_COORDS][N_CATEGORIES];
+double ** prev_gradients[NTHREAD];
+//double prev_gradients[N_DATAPOINT][N_COORDS][N_CATEGORIES];
 double ** model, **sum_gradients;
 int bookkeeping[N_COORDS];
 
@@ -196,20 +196,17 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
       compute_probs(p, probs);
       
       //Do gradient descent
+      int prev_grad_index = 0;
       for (int j = 0; j < sparse_array.size(); j++) {
 	for (int k = 0; k < N_CATEGORIES; k++) {
 	  int is_correct = k == chosen_category ? 1 : 0;
 	  double gradient = (-sparse_array[j].second * (is_correct - probs[k]));
 	  if (SAGA) {
-	    /*model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[thread_id][indx][j+k] + 
+	    model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[thread_id][indx][prev_grad_index] + 
 							sum_gradients[sparse_array[j].first][k] / N_DATAPOINT);
-	    sum_gradients[sparse_array[j].first][k] += gradient - prev_gradients[thread_id][indx][j+k];
-	    prev_gradients[thread_id][indx][j+k] = gradient;*/
-
-	    model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[update_order-1][sparse_array[j].first][k] + 
-							sum_gradients[sparse_array[j].first][k] / N_DATAPOINT);
-	    sum_gradients[sparse_array[j].first][k] += gradient -  prev_gradients[update_order-1][sparse_array[j].first][k];
-	    prev_gradients[update_order-1][sparse_array[j].first][k] = gradient;
+	    sum_gradients[sparse_array[j].first][k] += gradient - prev_gradients[thread_id][indx][prev_grad_index];
+	    prev_gradients[thread_id][indx][prev_grad_index] = gradient;
+	    prev_grad_index++;
 	  }
 	  else {
 	    model[sparse_array[j].first][k] -= GAMMA * gradient;
@@ -437,8 +434,8 @@ void cyc_text_classification() {
     distribute_ccs(CCs[i], access_pattern, access_length, batch_index_start, i, points, order);
   }
   //exit(0);
-
-  /*for (int i = 0; i < NTHREAD; i++) {
+  
+  for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
       int size = access_pattern[i][j].second.size();
@@ -447,7 +444,7 @@ void cyc_text_classification() {
 	prev_gradients[i][j][k] = 0;
       }
     }
-    }*/
+  }
 
   //Perform cyclades
   float copy_time = 0;
@@ -516,7 +513,7 @@ void hog_text_classification() {
     access_length[i][0] = n_points_per_thread;
   }
 
-  /*for (int i = 0; i < NTHREAD; i++) {
+  for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
     for (int j = 0; j < order[i].size(); j++) {
       int size = access_pattern[i][j].second.size();
@@ -525,7 +522,7 @@ void hog_text_classification() {
 	prev_gradients[i][j][k] = 0;
       }
     }
-    }*/
+  }
 
   //Divide to threads
   float copy_time = 0;
