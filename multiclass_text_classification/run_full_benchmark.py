@@ -62,7 +62,7 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
     for b in batch_size_range:
         for t in thread_range:
             for r in rank_range:
-                title = "Epoch_Loss_batch=%d_thread=%d_rank=%d" % (b, t, r)
+                title = "Epoch_Loss_batch=%d_thread=%d" % (b, t)
                 plt.figure()
                 plt.title(title, fontsize=12)
                 plt.xlabel("Epoch")
@@ -119,7 +119,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
 
     for b in batch_size_range:
         for t in thread_range:
-            title = "Overall_Time_Loss_batch=%d_thread=%d_rank=%d" % (b, t, r)
+            title = "Overall_Time_Loss_batch=%d_thread=%d" % (b, t)
             plt.figure()
             plt.title(title, fontsize=12)
             plt.xlabel("Time")
@@ -143,7 +143,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
 
     for b in batch_size_range:
         for t in thread_range:
-            title = "Gradient_Time_Loss_batch=%d_thread=%d_rank=%d" % (b, t, r)
+            title = "Gradient_Time_Loss_batch=%d_thread=%d" % (b, t)
             plt.figure()
             plt.title(title, fontsize=12)
             plt.xlabel("Time")
@@ -165,7 +165,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
 
     for b in batch_size_range:
         for t in thread_range:
-            title = "Gradient_Epoch_Loss_batch=%d_thread=%d_rank=%d" % (b, t, r)
+            title = "Gradient_Epoch_Loss_batch=%d_thread=%d" % (b, t)
             plt.figure()
             plt.title(title, fontsize=12)
             plt.xlabel("Epoch")
@@ -192,7 +192,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
         return
     for b in batch_size_range:
         for t in thread_range:
-            title = "Gradient_Time_Loss_Ratios_batch=%d_thread=%d_rank=%d" % (b, t, r)
+            title = "Gradient_Time_Loss_Ratios_batch=%d_thread=%d" % (b, t)
             plt.figure()
             plt.title(title, fontsize=12)
             plt.xlabel("Time")
@@ -222,7 +222,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
 
     for b in batch_size_range:
         for t in thread_range:
-            title = "Overall_Time_Loss_Ratios_batch=%d_thread=%d_rank=%d" % (b, t, r)
+            title = "Overall_Time_Loss_Ratios_batch=%d_thread=%d" % (b, t)
             plt.figure()
             plt.title(title, fontsize=12)
             plt.xlabel("Time")
@@ -303,7 +303,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
         for r in rank_range:
             for b in batch_size_range:
                 f, plots = plt.subplots(1, len(thread_range), sharex=True, sharey=True)
-                title = "Epoch_%s_Plot_Batch=%d_Rank=%d" % (label, b, r)
+                title = "Epoch_%s_Plot_Batch=%d" % (label, b)
                 f.suptitle(title, fontsize=12) 
                 for index, t in enumerate(thread_range):
                     plots[index].set_title("%d threads" % t)
@@ -333,7 +333,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
         for r in rank_range:
             for b in batch_size_range:
                 f, plots = plt.subplots(1, len(epoch_range), sharex=True, sharey=True)
-                title = "Thread_%s_Plot_Batch=%d_Rank=%d" % (label, b, r)
+                title = "Thread_%s_Plot_Batch=%d" % (label, b)
                 f.suptitle(title, fontsize=12) 
                 for index, e in enumerate(epoch_range):
                     plots[index].set_title("%d epoch" % e)
@@ -507,4 +507,4 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 #draw_time_loss_graph(0, 200, [4250], [1, 4, 8, 16, 32], [30, 100], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"], 3);
 
-draw_time_loss_graph(0, 500, [400], [16], [1], ["cyc_text_classification_cyc_saga", "cyc_text_classification_hog_saga"], 1);
+draw_time_loss_graph(0, 20000, [400], [16], [1], ["cyc_text_classification_cyc_saga", "cyc_text_classification_hog_saga"], 1);
