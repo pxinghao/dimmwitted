@@ -51,7 +51,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -363,10 +363,10 @@ vector<DataPoint> get_text_classification_data() {
     datapoints.push_back(DataPoint(label_map[(int)label], coord_freq_pairs));
     labels.insert(label);
   }
-
-  cout << "NUMBER OF COORDS: " << coords.size() << endl;
-  cout << "NUMBER OF LABELS: " << labels.size() << endl; 
-  cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
+  
+  //cout << "NUMBER OF COORDS: " << coords.size() << endl;
+  //cout << "NUMBER OF LABELS: " << labels.size() << endl; 
+  //cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
   return datapoints;
 }
 
@@ -603,6 +603,6 @@ int main(void) {
   if (CYC) {
     cyc_text_classification();
   }
-  for (int i = 0; i < NTHREAD; i++)
-    cout << thread_load_balance[i] << endl;
+  //for (int i = 0; i < NTHREAD; i++)
+  //cout << thread_load_balance[i] << endl;
 }

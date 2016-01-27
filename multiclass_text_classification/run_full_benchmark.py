@@ -26,7 +26,7 @@ def get_values(v, command_range, epoch_range, batch_size_range, thread_range, ra
                 for t in thread_range:
                     for r in rank_range:
                         for s in sync_range:
-                            values.append(v[c][e][b][t][r][s])
+                            values.append(v[c][e][b][t][0][s])
     return values
 
 def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, thread_range, rank_range, sync_range, commands,  gammas):
@@ -50,9 +50,9 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
                             losses = [values[i] for i in range(0, len(values), 3)]
                             overall_times = [values[i] for i in range(1, len(values), 3)]
                             gradient_times = [values[i] for i in range(2, len(values), 3)]
-                            loss_values[c][epoch_range][b][t][r][s] = losses
-                            overall_time_values[c][epoch_range][b][t][r][s] = overall_times
-                            gradient_time_values[c][epoch_range][b][t][r][s] = gradient_times
+                            loss_values[c][epoch_range][b][t][0][s] = losses
+                            overall_time_values[c][epoch_range][b][t][0][s] = overall_times
+                            gradient_time_values[c][epoch_range][b][t][0][s] = gradient_times
     else:
         with open('objs3.pickle') as f:
             loss_values, overall_time_values, gradient_time_values = pickle.load(f)
@@ -69,7 +69,7 @@ def draw_epoch_loss_graph(should_load_from_file, epoch_range, batch_size_range, 
                 plt.ylabel("Loss")
                 for s in sync_range:
                     for c in commands:
-                        losses = loss_values[c][epoch_range][b][t][r][s]
+                        losses = loss_values[c][epoch_range][b][t][0][s]
                         epochs = list(range(1, epoch_range+1))
                         
                         plt.plot(epochs, losses, label=c+" sync="+str(s), marker='o')
@@ -108,9 +108,9 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                         losses = [x / float(n_rep) for x in losses]
                         overall_times = [x / float(n_rep) for x in overall_times]
                         gradient_times = [x / float(n_rep) for x in gradient_times]
-                        loss_values[c][epoch_range][b][t][r][s] = losses
-                        overall_time_values[c][epoch_range][b][t][r][s] = overall_times
-                        gradient_time_values[c][epoch_range][b][t][r][s] = gradient_times
+                        loss_values[c][epoch_range][b][t][0][s] = losses
+                        overall_time_values[c][epoch_range][b][t][0][s] = overall_times
+                        gradient_time_values[c][epoch_range][b][t][0][s] = gradient_times
     else:
         with open('objs2.pickle') as f:
             loss_values, overall_time_values, gradient_time_values = pickle.load(f)
@@ -126,8 +126,8 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
             plt.ylabel("Loss")
             for s in sync_range:
                 for i, c in enumerate(commands):
-                    times = overall_time_values[c][epoch_range][b][t][r][s]
-                    losses = loss_values[c][epoch_range][b][t][r][s]
+                    times = overall_time_values[c][epoch_range][b][t][0][s]
+                    losses = loss_values[c][epoch_range][b][t][0][s]
                     print(c)
                     print(losses)
                     if 'hog' in c:
@@ -150,8 +150,8 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
             plt.ylabel("Loss")
             for s in sync_range:
                 for i, c in enumerate(commands):
-                    times = gradient_time_values[c][epoch_range][b][t][r][s]
-                    losses = loss_values[c][epoch_range][b][t][r][s]
+                    times = gradient_time_values[c][epoch_range][b][t][0][s]
+                    losses = loss_values[c][epoch_range][b][t][0][s]
                     if 'hog' in c:
                         if s:
                             plt.plot(times, losses, label=c)
@@ -173,7 +173,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
             for s in sync_range:
                 for i, c in enumerate(commands):
                     epochs = range(0, epoch_range)
-                    losses = loss_values[c][epoch_range][b][t][r][s]
+                    losses = loss_values[c][epoch_range][b][t][0][s]
                     if 'hog' in c:
                         if s:
                             plt.plot(epochs, losses, label=c)
@@ -201,10 +201,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 for i,c in enumerate(commands):
                     if c == hog_command:
                         continue
-                    hog_times = gradient_time_values[hog_command][epoch_range][b][t][r][s]
-                    cyc_times = gradient_time_values[c][epoch_range][b][t][r][s]
-                    hog_losses = loss_values[hog_command][epoch_range][b][t][r][s]
-                    cyc_losses = loss_values[c][epoch_range][b][t][r][s]
+                    hog_times = gradient_time_values[hog_command][epoch_range][b][t][0][s]
+                    cyc_times = gradient_time_values[c][epoch_range][b][t][0][s]
+                    hog_losses = loss_values[hog_command][epoch_range][b][t][0][s]
+                    cyc_losses = loss_values[c][epoch_range][b][t][0][s]
                         # Compute cyc losses -- the best loss cyc achieved by hog's time
                     cyc_losses_aligned = []
                     for i1, t1 in enumerate(hog_times):
@@ -231,10 +231,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                 for i, c in enumerate(commands):
                     if hog_command == c:
                         continue
-                    hog_times = overall_time_values[hog_command][epoch_range][b][t][r][s]
-                    cyc_times = overall_time_values[c][epoch_range][b][t][r][s]
-                    hog_losses = loss_values[hog_command][epoch_range][b][t][r][s]
-                    cyc_losses = loss_values[c][epoch_range][b][t][r][s]
+                    hog_times = overall_time_values[hog_command][epoch_range][b][t][0][s]
+                    cyc_times = overall_time_values[c][epoch_range][b][t][0][s]
+                    hog_losses = loss_values[hog_command][epoch_range][b][t][0][s]
+                    cyc_losses = loss_values[c][epoch_range][b][t][0][s]
                         # Compute cyc losses -- the best loss cyc achieved by hog's time
                     cyc_losses_aligned = []
                     for i1, t1 in enumerate(hog_times):
@@ -313,7 +313,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             plots[index].tick_params(axis='both', which='major', labelsize=5)
                             plots[index].tick_params(axis='both', which='minor', labelsize=5)
                             plots[index].set_ylabel(label)
-                            times = get_values(time_data, [c], epoch_range, [b], [t], [r], [s])
+                            times = get_values(time_data, [c], epoch_range, [b], [t], [0], [s])
                             epochs = epoch_range
                             low = min(times)
                             high = max(times)
@@ -343,7 +343,7 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             plots[index].tick_params(axis='both', which='minor', labelsize=8)
                             plots[index].set_xlabel("Thread")
                             plots[index].set_ylabel(label)
-                            times = get_values(time_data, [c], [e], [b], thread_range, [r], [s])
+                            times = get_values(time_data, [c], [e], [b], thread_range, [0], [s])
                             threads = thread_range
                             low = min(times)
                             high = max(times)
@@ -380,8 +380,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             plt.title(title, fontsize=12)
                             plt.ylabel("Serial_Time/Time_With_N_Threads")
                             plt.xlabel("N")
-                            base_time = average_total_times[c][e][b][1][r][s]
-                            time_values = get_values(average_total_times, [c], [e], [b], thread_range, [r], [s])
+                            base_time = average_total_times[c][e][b][1][0][s]
+                            time_values = get_values(average_total_times, [c], [e], [b], thread_range, [0], [s])
                             time_ratios = [float(base_time)/x for x in time_values]
                             plt.plot(thread_range, time_ratios)
                             plt.legend(loc="upper left", fontsize=5)
@@ -403,8 +403,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                             plt.title(title, fontsize=12)
                             plt.ylabel("Serial_Time/Time_With_N_Threads")
                             plt.xlabel("N")
-                            base_time = average_gradient_times[c][e][b][1][r][s]
-                            time_values = get_values(average_total_times, [c], [e], [b], thread_range, [r], [s])
+                            base_time = average_gradient_times[c][e][b][1][0][s]
+                            time_values = get_values(average_total_times, [c], [e], [b], thread_range, [0], [s])
                             time_ratios = [float(base_time)/x for x in time_values]
                             plt.plot(thread_range, time_ratios)
                             plt.legend(loc="upper left", fontsize=5)
@@ -426,8 +426,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 for s in sync_range:
                     for c in commands:
                         if 'hog' not in c:
-                            baseline_hog_times = get_values(average_total_times, [hog_command], epoch_range, [b], [t], [r], [s])
-                            times = get_values(average_total_times, [c], epoch_range, [b], [t], [r], [s])
+                            baseline_hog_times = get_values(average_total_times, [hog_command], epoch_range, [b], [t], [0], [s])
+                            times = get_values(average_total_times, [c], epoch_range, [b], [t], [0], [s])
                             ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
                             plt.plot(epoch_range, ratio_times, label=c+"_sync="+str(s))
                 plt.legend(loc="upper left", fontsize=5)
@@ -446,8 +446,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 for s in sync_range:
                     for c in commands:
                         if 'hog' not in c:
-                            baseline_hog_times = get_values(average_total_times, [hog_command], epoch_range, [b], [t], [r], [s])
-                            times = get_values(average_gradient_times, [c], epoch_range, [b], [t], [r], [s])
+                            baseline_hog_times = get_values(average_total_times, [hog_command], epoch_range, [b], [t], [0], [s])
+                            times = get_values(average_gradient_times, [c], epoch_range, [b], [t], [0], [s])
                             ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
                             plt.plot(epoch_range, ratio_times, label=c+"_sync="+str(s))
                 plt.legend(loc="upper left", fontsize=5)
@@ -469,8 +469,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 for s in sync_range:
                     for c in commands:
                         if 'hog' not in c:
-                            baseline_hog_times = get_values(average_total_times, [hog_command], [e], [b], thread_range, [r], [s])
-                            times = get_values(average_total_times, [c], [e], [b], thread_range, [r], [s])
+                            baseline_hog_times = get_values(average_total_times, [hog_command], [e], [b], thread_range, [0], [s])
+                            times = get_values(average_total_times, [c], [e], [b], thread_range, [0], [s])
                             ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
                             plt.plot(thread_range, ratio_times, label=c+"_sync="+str(s))
                 plt.legend(loc="upper left", fontsize=5)
@@ -488,8 +488,8 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
                 for s in sync_range:
                     for c in commands:
                         if 'hog' not in c:
-                            baseline_hog_times = get_values(average_total_times, [hog_command], [e], [b], thread_range, [r], [s])
-                            times = get_values(average_gradient_times, [c], [e], [b], thread_range, [r], [s])
+                            baseline_hog_times = get_values(average_total_times, [hog_command], [e], [b], thread_range, [0], [s])
+                            times = get_values(average_gradient_times, [c], [e], [b], thread_range, [0], [s])
                             ratio_times = [float(baseline_hog_times[i]) / float(times[i]) for i in range(len(times))]
                             plt.plot(thread_range, ratio_times, label=c+"_sync="+str(s))
                 plt.legend(loc="upper left", fontsize=5)
