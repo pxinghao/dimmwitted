@@ -41,11 +41,11 @@ cyc_text_classification_cyc_sgd_run:
 
 cyc_text_classification_hog:
 	rm -rf text_classification_hog
-	g++  -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread  -DHOG=1 -o text_classification_hog
+	g++  -march=native -Ofast -fopenmp -std=c++11 cyclades_text_classification.cpp -lnuma -lpthread  -DHOG=1 -o text_classification_hog
 	./text_classification_hog
 cyc_text_classification_cyc:
 	rm -rf text_classification_cyc
-	g++ -Ofast -fopenmp -std=c++11  cyclades_text_classification.cpp -lnuma -lpthread -DCYC=1 -o text_classification_cyc
+	g++ -march=native -Ofast -fopenmp -std=c++11  cyclades_text_classification.cpp -lnuma -lpthread -DCYC=1 -o text_classification_cyc
 	./text_classification_cyc
 
 cyc_text_classification_cyc_batch_tune:

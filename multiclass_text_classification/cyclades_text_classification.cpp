@@ -18,10 +18,16 @@
 #include <cmath>
 
 #define TEXT_CLASSIFICATION_FILE "random_lines_filtered"
+#define N_COORDS 1416216
+#define N_CATEGORIES 2
+#define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
+#define N_DATAPOINT 600130
+
+/*#define TEXT_CLASSIFICATION_FILE "random_lines_filtered"
 #define N_COORDS 411896
 #define N_CATEGORIES 2
 #define N_CATEGORIES_CACHE_ALIGNED (N_CATEGORIES / 8 + 1) * 8
-#define N_DATAPOINT 120132
+#define N_DATAPOINT 120132*/
 
 /*#define TEXT_CLASSIFICATION_FILE "random_lines_filtered_filtered"
 #define N_COORDS 819
@@ -35,11 +41,12 @@
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 1000
+#define N_EPOCHS 100
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 400
+#define BATCH_SIZE 5000
+//#define BATCH_SIZE 400
 #endif
 
 #ifndef HOG
@@ -51,7 +58,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -67,7 +74,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA .1 // SAGA
+#define START_GAMMA .001 // SAGA
 //#define START_GAMMA 2 // SGD
 #endif
 
@@ -75,10 +82,14 @@ double GAMMA = START_GAMMA;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
+int volatile conflicts = 0;
+int volatile locked[N_COORDS];
 
 double ** prev_gradients[NTHREAD];
 //double prev_gradients[N_DATAPOINT][N_COORDS][N_CATEGORIES];
-double ** model, **sum_gradients;
+double model[N_COORDS][N_CATEGORIES_CACHE_ALIGNED] __attribute__((aligned(64)));
+//double ** model;
+double **sum_gradients;
 int bookkeeping[N_COORDS];
 
 double thread_load_balance[NTHREAD];
@@ -143,8 +154,12 @@ double compute_loss(vector<DataPoint> &points) {
 
 void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
   pin_to_core(thread_id);
-
   double probs[N_CATEGORIES];
+  int sums[NTHREAD];
+  sums[0] = 0;
+  for (int i = 1; i < NTHREAD; i++) {
+    sums[i] = sums[i-1] + thread_load_balance[i-1];
+  }
   for (int batch = 0; batch < access_length.size(); batch++) {
     
     //Wait for all threads to be on the same batch
@@ -170,12 +185,15 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
       vector<pair<int, double> > sparse_array = p.second;
       int indx = batch_index_start[batch]+i;
       int update_order = order[indx];
+      double sum_prob = 0;
 
       if (SAGA) {
 	for (int k = 0; k < sparse_array.size(); k++) {
+	  register int coord = sparse_array[k].first;
+	  //coord = sums[thread_id] + k;
 	  for (int j = 0; j < N_CATEGORIES; j++) {
-	    double diff = update_order - bookkeeping[sparse_array[k].first] - 1; 
-	    model[sparse_array[k].first][j] -= GAMMA * sum_gradients[sparse_array[k].first][j] * diff / N_DATAPOINT;
+	    double diff = update_order - bookkeeping[coord] - 1; 
+	    model[coord][j] -= GAMMA * sum_gradients[coord][j] * diff / N_DATAPOINT;
 	  }
 	}
       }
@@ -190,28 +208,50 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	  //cout << model[second_coord][j] << endl;
 	}
       }
-
-      //Clear probs
-      compute_probs(p, probs);
       
+      //Clear probs
+      //for (int j = 0; j < N_CATEGORIES; j++) 
+      //probs[j] = 0;
+      memset(probs, 0, sizeof(double) * N_CATEGORIES);
+      
+      //x^t A_i
+      for (int j = 0; j < sparse_array.size(); j++) {
+	register int coordinate = sparse_array[j].first;
+	//coordinate = sums[thread_id] + j;
+	register double weight = sparse_array[j].second;
+	for (int k = 0; k < N_CATEGORIES; k++) {
+	  probs[k] += model[coordinate][k] * weight;
+	}
+      }
+      for (int j = 0; j < N_CATEGORIES; j++) {
+	probs[j] = exp(probs[j]);
+	sum_prob += probs[j];
+	}
+            
       //Do gradient descent
       int prev_grad_index = 0;
       for (int j = 0; j < sparse_array.size(); j++) {
+	register int coordinate = sparse_array[j].first;
+	//coordinate = sums[thread_id] + j;
+	register double weight = sparse_array[j].second;
 	for (int k = 0; k < N_CATEGORIES; k++) {
 	  int is_correct = k == chosen_category ? 1 : 0;
-	  double gradient = (-sparse_array[j].second * (is_correct - probs[k]));
+	  double gradient = (-weight * (is_correct - probs[k]/sum_prob));
 	  if (SAGA) {
-	    model[sparse_array[j].first][k] -= GAMMA * (gradient - prev_gradients[thread_id][indx][prev_grad_index] + 
-							sum_gradients[sparse_array[j].first][k] / N_DATAPOINT);
-	    sum_gradients[sparse_array[j].first][k] += gradient - prev_gradients[thread_id][indx][prev_grad_index];
+	    if (locked[coordinate]) conflicts++;
+	    locked[coordinate] = 1;
+	    model[coordinate][k] -= GAMMA * (gradient - prev_gradients[thread_id][indx][prev_grad_index] + 
+							sum_gradients[coordinate][k] / N_DATAPOINT);
+	    sum_gradients[coordinate][k] += gradient - prev_gradients[thread_id][indx][prev_grad_index];
 	    prev_gradients[thread_id][indx][prev_grad_index] = gradient;
 	    prev_grad_index++;
+	    locked[coordinate] = 0;
 	  }
 	  else {
-	    model[sparse_array[j].first][k] -= GAMMA * gradient;
+	    model[coordinate][k] -= GAMMA * gradient;
 	  }
 	}
-	bookkeeping[sparse_array[j].first] = update_order;
+	bookkeeping[coordinate] = update_order;
       }
     }
   }
@@ -253,9 +293,9 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   avg_cc_size /= (double)ccs.size();
 
   for (int i = 0; i < balances.size(); i++) {
-    //cout << balances[i].second << " ";
+    cout << balances[i].second << " ";
   }
-  //cout << endl;
+  cout << endl;
   
   //Allocate memory
   int index_count[NTHREAD];
@@ -340,6 +380,7 @@ vector<DataPoint> get_text_classification_data() {
     vector<pair<int, double> > coord_freq_pairs;
     int num_coords_encountered = 0;
     while (linestream >> coord_freq_str) {
+      //if (num_coords_encountered++ >= 2) break;
       stringstream coord_freq_stream(coord_freq_str);
       getline(coord_freq_stream, coord_str, ':');
       getline(coord_freq_stream, freq_str, ':');
@@ -364,9 +405,9 @@ vector<DataPoint> get_text_classification_data() {
     labels.insert(label);
   }
   
-  //cout << "NUMBER OF COORDS: " << coords.size() << endl;
-  //cout << "NUMBER OF LABELS: " << labels.size() << endl; 
-  //cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
+  cout << "NUMBER OF COORDS: " << coords.size() << endl;
+  cout << "NUMBER OF LABELS: " << labels.size() << endl; 
+  cout << "NUMBER OF DATAPOINTS: " << datapoints.size() << endl;
   return datapoints;
 }
 
@@ -564,9 +605,9 @@ int main(void) {
   pin_to_core(0);
 
   sum_gradients = (double **)malloc(sizeof(double *) * N_COORDS);
-  model = (double **)malloc(sizeof(double *) * N_COORDS);
+  //model = (double **)malloc(sizeof(double *) * N_COORDS);
   for (int i = 0; i < N_COORDS; i++) {
-    model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
+    //model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
     sum_gradients[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
   }
 
@@ -605,4 +646,5 @@ int main(void) {
   }
   //for (int i = 0; i < NTHREAD; i++)
   //cout << thread_load_balance[i] << endl;
+  cout << conflicts << endl;
 }
