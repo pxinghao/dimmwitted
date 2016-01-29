@@ -27,11 +27,11 @@
 //#define N_DATAPOINTS 10020
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 200
+#define N_EPOCHS 10
 #endif 
 
 #ifndef BATCH_SIZE
@@ -88,6 +88,7 @@ int volatile thread_batch_on[NTHREAD];
 //double model[N_NODES][K_TO_CACHELINE] __attribute__((aligned(64)));
 //double prevv_gradients[N_DATAPOINTS][2][K_TO_CACHELINE];
 double *C_sum_mult[NTHREAD];
+double *C_sum_mult2[NTHREAD];
 double ** prev_gradients[NTHREAD];
 double ** model, **sum_gradients;
 double **model_records[N_EPOCHS];
@@ -264,6 +265,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 
       //Keep track of sums for optimizing C
       //C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C);
+      C_sum_mult[thread_id][indx] = r * (log(r) - l2norm_sqr);
+      C_sum_mult2[thread_id][indx] = r;
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -550,15 +553,18 @@ void cyc_word_embeddings() {
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
     compute_CC_thread(CCs[i], points, start, end, omp_get_thread_num());
   }
+  Timer allocation;
   for (int i = 0; i < n_batches; i++) {
     distribute_ccs(CCs[i], access_pattern, access_length, batch_index_start, i, points, order);
   }
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
-    //C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
+    C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
+    C_sum_mult2[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
-      //C_sum_mult[i][j] = 0;
+      C_sum_mult[i][j] = 0;
+      C_sum_mult2[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -597,18 +603,11 @@ void cyc_word_embeddings() {
     //Optimize C
     double C_A = 0, C_B = 0;
 #pragma omp parallel for reduction(+:C_A,C_B)
-    for (int j = 0; j < points.size(); j++) {
-      
-      DataPoint p = points[j];
-      int x1 = get<0>(p), x2 = get<1>(p);
-      double weight = get<2>(p);
-      double l2_norm_sqr = 0;
-      for (int k = 0; k < K; k++) {
-	l2_norm_sqr += (model[x1][k] + model[x2][k]) * (model[x1][k] + model[x2][k]);
+    for (int t = 0; t < NTHREAD; t++) {
+      for (int d = 0; d < order[t].size(); d++) {
+	C_A += C_sum_mult[t][d];
+	C_B += C_sum_mult2[t][d];
       }
-      
-      C_A += weight * (log(weight) - l2_norm_sqr);
-      C_B += weight;
     }
     C = C_A / C_B;
     
@@ -659,9 +658,11 @@ void hog_word_embeddings() {
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
-    //C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
+    C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
+    C_sum_mult2[i] = (double *)malloc(sizeof(double) * order[i].size());
     for (int j = 0; j < order[i].size(); j++) {
-      //C_sum_mult[i][j] = 0;
+      C_sum_mult[i][j] = 0;
+      C_sum_mult2[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -695,20 +696,14 @@ void hog_word_embeddings() {
     clear_bookkeeping();
     
     //Optimize C
+    //Optimize C
     double C_A = 0, C_B = 0;
 #pragma omp parallel for reduction(+:C_A,C_B)
-    for (int j = 0; j < points.size(); j++) {
-      
-      DataPoint p = points[j];
-      int x1 = get<0>(p), x2 = get<1>(p);
-      double weight = get<2>(p);
-      double l2_norm_sqr = 0;
-      for (int k = 0; k < K; k++) {
-	l2_norm_sqr += (model[x1][k] + model[x2][k]) * (model[x1][k] + model[x2][k]);
+    for (int t = 0; t < NTHREAD; t++) {
+      for (int d = 0; d < order[t].size(); d++) {
+	C_A += C_sum_mult[t][d];
+	C_B += C_sum_mult2[t][d];
       }
-      
-      C_A += weight * (log(weight) - l2_norm_sqr);
-      C_B += weight;
     }
     C = C_A / C_B;
 
