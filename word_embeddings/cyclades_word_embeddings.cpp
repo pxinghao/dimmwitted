@@ -23,8 +23,8 @@
 //#define N_DATAPOINTS 80821
 #define N_NODES 213271
 #define N_DATAPOINTS 20207156
-//#define N_NODES 16774
-//#define N_DATAPOINTS 622948
+//#define N_NODES 628
+//#define N_DATAPOINTS 10020
 
 #ifndef NTHREAD
 #define NTHREAD 8
@@ -72,7 +72,7 @@
 #ifndef START_GAMMA
 //#define START_GAMMA 2.3e-4//3.42e-5
 //#define START_GAMMA 9e-6 // SAG
-#define START_GAMMA 1e-10 // SGD
+#define START_GAMMA 1e-10 // SG
 #endif
 
 double volatile C = 0;
@@ -263,7 +263,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double mult = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Keep track of sums for optimizing C
-      C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C);
+      //C_sum_mult[thread_id][indx] = 2 * r * (log(r) - l2norm_sqr - C);
 
       //Apply gradient update
       for (int j = 0; j < K; j++) {
@@ -503,12 +503,8 @@ void initialize_model() {
 
 void cyc_word_embeddings() {
   vector<DataPoint> points = get_word_embeddings_data();
-  vector<DataPoint> points_copy = points;
-  for (int i = 0; i < points.size(); i++) {
-    int x = get<0>(points[i]), y = get<1>(points[i]);
-  }
   initialize_model();
-  //random_shuffle(points.begin(), points.end());
+  random_shuffle(points.begin(), points.end());
   Timer overall;
 
   //Access pattern generation
@@ -560,9 +556,9 @@ void cyc_word_embeddings() {
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
-    C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
+    //C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
-      C_sum_mult[i][j] = 0;
+      //C_sum_mult[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -597,40 +593,26 @@ void cyc_word_embeddings() {
       }
     }
     clear_bookkeeping();
-    GAMMA *= GAMMA_REDUCTION;
 
     //Optimize C
-    double c_gradient = 0;    
-#pragma omp parallel for reduction(+:c_gradient)
-    for (int t = 0; t < NTHREAD; t++) {
-      for (int d = 0; d < thread_load_balance[t]; d++) {
-	c_gradient += -C_sum_mult[t][d];
+    double C_A = 0, C_B = 0;
+#pragma omp parallel for reduction(+:C_A,C_B)
+    for (int j = 0; j < points.size(); j++) {
+      
+      DataPoint p = points[j];
+      int x1 = get<0>(p), x2 = get<1>(p);
+      double weight = get<2>(p);
+      double l2_norm_sqr = 0;
+      for (int k = 0; k < K; k++) {
+	l2_norm_sqr += (model[x1][k] + model[x2][k]) * (model[x1][k] + model[x2][k]);
       }
+      
+      C_A += weight * (log(weight) - l2_norm_sqr);
+      C_B += weight;
     }
-    C -= GAMMA * c_gradient;
-
-    /*if (i % 1 == 0) {
-      random_shuffle(points_copy.begin(), points_copy.end(), myrandom);
-      
-      for (int ii = 0; ii < NTHREAD; ii++) {
-	numa_free(access_pattern[ii], thread_load_balance[ii] * sizeof(DataPoint));
-	cur_bytes_allocated[ii] = 0;
-	thread_load_balance[ii] = 0;
-	cur_datapoints_used[ii] = 0;
-      }
-      for (int ii = 0; ii < n_batches; ii++) {
-      
-	int start = ii * BATCH_SIZE;
-	int end = min((ii+1)*BATCH_SIZE, (int)points_copy.size());	
-	///Compute connected components of data points_copy
-	Timer ttt;
-	map<int, vector<int> > cc = compute_CC(points_copy, start, end);
-	//Distribute connected components across threads
-	Timer ttt2;
-	distribute_ccs(cc, access_pattern, access_length, batch_index_start, ii, points_copy, order);
-      }    
-      //END
-      }*/
+    C = C_A / C_B;
+    
+    GAMMA *= GAMMA_REDUCTION;
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -677,9 +659,9 @@ void hog_word_embeddings() {
 
   for (int i = 0; i < NTHREAD; i++) {
     prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
-    C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
+    //C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
     for (int j = 0; j < order[i].size(); j++) {
-      C_sum_mult[i][j] = 0;
+      //C_sum_mult[i][j] = 0;
       prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
 	prev_gradients[i][j][k] = 0;
@@ -712,14 +694,23 @@ void hog_word_embeddings() {
     }
     clear_bookkeeping();
     
-    double c_gradient = 0;
-#pragma omp parallel for reduction(+:c_gradient)
-    for (int t = 0; t < NTHREAD; t++) {
-      for (int d = 0; d < order[t].size(); d++) {
-	c_gradient += -C_sum_mult[t][d];
+    //Optimize C
+    double C_A = 0, C_B = 0;
+#pragma omp parallel for reduction(+:C_A,C_B)
+    for (int j = 0; j < points.size(); j++) {
+      
+      DataPoint p = points[j];
+      int x1 = get<0>(p), x2 = get<1>(p);
+      double weight = get<2>(p);
+      double l2_norm_sqr = 0;
+      for (int k = 0; k < K; k++) {
+	l2_norm_sqr += (model[x1][k] + model[x2][k]) * (model[x1][k] + model[x2][k]);
       }
+      
+      C_A += weight * (log(weight) - l2_norm_sqr);
+      C_B += weight;
     }
-    C -= GAMMA * c_gradient;
+    C = C_A / C_B;
 
     GAMMA *= GAMMA_REDUCTION;
   }
@@ -738,7 +729,7 @@ int main(void) {
   omp_set_num_threads(NTHREAD);  
   srand(0);
   std::cout << std::fixed << std::showpoint;
-  std::cout << std::setprecision(20);
+  std::cout << std::setprecision(10);
   pin_to_core(0);
 
   sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
