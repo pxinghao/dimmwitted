@@ -18,18 +18,18 @@
 #include <cmath>
 
 #define N_DIMENSION 1000
-#define NUM_SPARSE_ELEMENTS_IN_ROW N_DIMENSION / 100
+#define NUM_SPARSE_ELEMENTS_IN_ROW 20
 
 #ifndef NTHREAD
 #define NTHREAD 1
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 20
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 5000
+#define BATCH_SIZE 10000000
 #endif
 
 #ifndef HOG
@@ -53,7 +53,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-15
+#define START_GAMMA 2e-9
 #endif
 
 #ifndef SVRG
@@ -193,11 +193,14 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	    //catch up
 	    for (auto const &x : sparse_array) {
 		double diff = update_order - bookkeeping[x.first] - 1;
+		//if (x.first == 390) cout << "hi " << " " << diff << endl;
 		double sum = 0;
-		for (int j = 0; j < diff-1; j++) {
+		for (int j = 0; j < diff; j++) {
 		    sum += pow(1 - LAMBDA * GAMMA * C,  j);
 		}
-		model[x.first] = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff) +  (GAMMA * (C * LAMBDA * model_tilde[x.first] - sum_gradient_tilde[x.first])) * sum;
+		double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
+		double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
+		model[x.first] = first_part + second_part;
 	    }
 
 	    //Compute gradient
@@ -209,7 +212,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	    for (auto const &x : sparse_array) {
 		double gradient = C * LAMBDA * model[x.first] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
 		model[x.first] -= GAMMA * (gradient - gradient_tilde[row][x.first] + sum_gradient_tilde[x.first] / N_DIMENSION);
-		//model[x.first] -= GAMMA * gradient;
 		bookkeeping[x.first] = update_order;
 	    }
 	}
@@ -337,10 +339,12 @@ void update_coords() {
     for (int i = 0; i < N_DIMENSION; i++) {
 	double diff = N_DIMENSION - bookkeeping[i];
 	double sum = 0;
-	for (int j = 0; j < diff-1; j++) {
+	for (int j = 0; j < diff; j++) {
 	    sum += pow(1 - GAMMA * LAMBDA * C, j);
 	}
-	model[i] = model[i] * pow(1 - GAMMA * LAMBDA * C, diff) + (GAMMA * (C * LAMBDA * model_tilde[i] - sum_gradient_tilde[i])) * sum;
+	double first_part = model[i] * pow(1 - LAMBDA * C * GAMMA, diff);
+	double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
+	model[i] = first_part + second_part;
     }
 }
 
@@ -505,6 +509,7 @@ void cyc_matrix_inverse() {
     }
     GAMMA *= GAMMA_REDUCTION;
     clear_bookkeeping();
+    //for (int j = 0; j < N_DIMENSION; j++) cout << model[j] << endl;
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
