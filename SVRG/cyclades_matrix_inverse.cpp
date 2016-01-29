@@ -19,14 +19,16 @@
 
 #define N_DIMENSION 2000
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
-#define NUM_SPARSE_ELEMENTS_IN_ROW 5
+#define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
+#define RANGE 100
+
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 10
 #endif
 
 #ifndef BATCH_SIZE
@@ -70,7 +72,6 @@ int volatile thread_batch_on[NTHREAD];
 
 double model[N_DIMENSION];
 double B[N_DIMENSION];
-double norm_row[N_DIMENSION];
 double C = 0; //1 / (frobenius norm of matrix)^2
 double LAMBDA = 0;
 
@@ -391,20 +392,15 @@ void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
 }
 
 vector<DataPoint> get_sparse_matrix() {
-    vector<int> sparse_rows_left;
-    for (int i = 0; i < N_DIMENSION; i++) sparse_rows_left.push_back(i);
-    random_shuffle(sparse_rows_left.begin(), sparse_rows_left.end());
-
     vector<DataPoint> sparse_matrix;
 
     //Randomize the sparse matrix
     for (int i = 0; i < N_DIMENSION; i++) {
-	DataPoint p;
-	p.first = sparse_rows_left[i];
-	for (int j = 0; j < NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
-	    p.second[rand() % N_DIMENSION] = rand() % 100;
-	}
-	sparse_matrix.push_back(p);
+      DataPoint p = DataPoint(i, map<int, double>());
+      for (int j = 0; j < rand()%NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
+	p.second[rand() % N_DIMENSION] = rand() % RANGE;
+      } 
+      sparse_matrix.push_back(p);
     }
 
     //Normalize the rows to be 1
@@ -415,47 +411,48 @@ vector<DataPoint> get_sparse_matrix() {
 	    sum += x.second * x.second;
 	}
 	double norm_factor = sqrt(sum);
-	for (auto const & x : row) {
+	if (norm_factor != 0) {
+	  for (auto const & x : row) {
 	    row[x.first] /= norm_factor;
+	  }
 	}
-
-	norm_row[sparse_matrix[i].first] = norm_factor;
     }
 
     //Calculate frobenius norm of matrix
     double sum = 0;
     for (int i = 0; i < N_DIMENSION; i++) {
-	map<int, double> row = sparse_matrix[i].second;
-	for (auto const & x : row) {
-	    sum += x.second * x.second;
-	}
+      map<int, double> row = sparse_matrix[i].second;
+      for (auto const & x : row) {
+	sum += x.second * x.second;
+      }
     }
     C = 1 / sum;
 
     //Initialize B to be random
     for (int i = 0; i < N_DIMENSION; i++) {
-	B[i] = rand() % 100;
+      B[i] = rand() % 100;
     }
-
+    
     //Compute Lambda
     double x_k_prime[N_DIMENSION], x_k[N_DIMENSION];
     memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
     memcpy(x_k, B, sizeof(double) * N_DIMENSION);
     for (int i = 0; i < 3; i++) {
-	mat_vect_mult(sparse_matrix, x_k, x_k_prime);
-	memcpy(x_k, x_k_prime, sizeof(double) * N_DIMENSION);
-	memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
+      mat_vect_mult(sparse_matrix, x_k, x_k_prime);
+      memcpy(x_k, x_k_prime, sizeof(double) * N_DIMENSION);
+      memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
     }
     double x_3_norm = 0;
     for (int i = 0; i < N_DIMENSION; i++) {
-	x_3_norm += x_k[i] * x_k[i];
+      x_3_norm += x_k[i] * x_k[i];
     }
     x_3_norm = sqrt(x_3_norm);
     mat_vect_mult(sparse_matrix, x_k, x_k_prime);
     for (int i = 0; i < N_DIMENSION; i++) {
-	LAMBDA += x_k_prime[i] * 1.1 * x_3_norm;
+      LAMBDA += x_k_prime[i] * 1.1 * x_3_norm;
     }
-
+    cout << LAMBDA << endl;
+    
     return sparse_matrix;
 }
 
