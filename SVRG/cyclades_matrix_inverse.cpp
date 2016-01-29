@@ -19,13 +19,13 @@
 
 #define N_DIMENSION 2000
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
-#define NUM_SPARSE_ELEMENTS_IN_ROW 10
+#define NUM_SPARSE_ELEMENTS_IN_ROW 20
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
-#define RANGE 100
+#define RANGE 100000
 
 #ifndef N_EPOCHS
 #define N_EPOCHS 10
@@ -56,7 +56,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-9
+#define START_GAMMA 2e-12
 #endif
 
 #ifndef SVRG
@@ -167,18 +167,19 @@ void calculate_gradient_tilde(vector<DataPoint> &pts) {
     }
 }
 
-void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, int epoch) {
+void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, vector<int> &batch_pattern) {
   pin_to_core(thread_id);
-  for (int batch = 0; batch < access_length.size(); batch++) {
+  for (int batch_iter = 0; batch_iter < access_length.size(); batch_iter++) {
+    int batch = batch_pattern[batch_iter];
 
     //Wait for all threads to be on the same batch
     if (SHOULD_SYNC) {
-      thread_batch_on[thread_id] = batch;
+      thread_batch_on[thread_id] = batch_iter;
       int waiting_for_other_threads = 1;
       while (waiting_for_other_threads) {
 	waiting_for_other_threads = 0;
 	for (int ii = 0; ii < NTHREAD; ii++) {
-	  if (thread_batch_on[ii] < batch) {
+	  if (thread_batch_on[ii] < batch_iter) {
 	    waiting_for_other_threads = 1;
 	    break;
 	  }
@@ -397,7 +398,7 @@ vector<DataPoint> get_sparse_matrix() {
     //Randomize the sparse matrix
     for (int i = 0; i < N_DIMENSION; i++) {
       DataPoint p = DataPoint(i, map<int, double>());
-      for (int j = 0; j < rand()%NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
+      for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
 	p.second[rand() % N_DIMENSION] = rand() % RANGE;
       } 
       sparse_matrix.push_back(p);
@@ -451,7 +452,6 @@ vector<DataPoint> get_sparse_matrix() {
     for (int i = 0; i < N_DIMENSION; i++) {
       LAMBDA += x_k_prime[i] * 1.1 * x_3_norm;
     }
-    cout << LAMBDA << endl;
     
     return sparse_matrix;
 }
@@ -474,6 +474,9 @@ void cyc_matrix_inverse() {
     batch_index_start[i].resize(n_batches);
     order[i].resize(n_batches);
   }
+
+  vector<int> batch_pattern;
+  for (int i = 0; i < n_batches; i++) batch_pattern.push_back(i);
 
   //CC Parallel
   map<int, vector<int> > CCs[n_batches];
@@ -514,11 +517,11 @@ void cyc_matrix_inverse() {
 
     vector<thread> threads;
     if (NTHREAD == 1) {
-	do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, batch_pattern);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	  threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, ref(batch_pattern)));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -529,7 +532,9 @@ void cyc_matrix_inverse() {
     }
     GAMMA *= GAMMA_REDUCTION;
     clear_bookkeeping();
-    //for (int j = 0; j < N_DIMENSION; j++) cout << model[j] << endl;
+    
+    //Shuffle
+    random_shuffle(batch_pattern.begin(), batch_pattern.end());
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -549,6 +554,8 @@ void hog_matrix_inverse() {
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int> > batch_index_start(NTHREAD);
   vector<vector<int> > order(NTHREAD);
+  vector<int> batch_pattern;
+  batch_pattern.push_back(0);
 
   //Timer t2;
   int n_points_per_thread = points.size() / NTHREAD;
@@ -587,11 +594,11 @@ void hog_matrix_inverse() {
     //cout << compute_loss(points) << endl;
     vector<thread> threads;
     if (NTHREAD == 1) {
-      do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, i);
+      do_cyclades_gradient_descent_with_points((DataPoint *)&access_pattern[0][0], access_length[0], batch_index_start[0], order[0], 0, batch_pattern);
     }
     else {
       for (int j = 0; j < NTHREAD; j++) {
-	threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, i));
+	threads.push_back(thread(do_cyclades_gradient_descent_with_points, (DataPoint *)&access_pattern[j][0], ref(access_length[j]), ref(batch_index_start[j]), ref(order[j]), j, ref(batch_pattern)));
       }
       for (int j = 0; j < threads.size(); j++) {
 	threads[j].join();
@@ -599,6 +606,15 @@ void hog_matrix_inverse() {
     }
     GAMMA *= GAMMA_REDUCTION;
     clear_bookkeeping();
+
+    
+    for (int j = 0; j < NTHREAD; j++) {
+      int rand_seed = rand();
+      srand(rand_seed);
+      random_shuffle(access_pattern[j].begin(), access_pattern[j].end());
+      srand(rand_seed);
+      random_shuffle(order[j].begin(), order[j].end());
+    }
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
