@@ -17,9 +17,9 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 100
+#define N_DIMENSION 10000
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
-#define NUM_SPARSE_ELEMENTS_IN_ROW 5
+#define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
 #ifndef NTHREAD
 #define NTHREAD 8
@@ -28,11 +28,11 @@
 #define RANGE 100000
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 100
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 500
+#define BATCH_SIZE 1000
 #endif
 
 #ifndef HOG
@@ -44,7 +44,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -56,7 +56,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-12
+#define START_GAMMA 2e-9
 #endif
 
 #ifndef SVRG
@@ -156,7 +156,7 @@ double compute_loss(vector<DataPoint> &pts) {
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
-  return;
+
     memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
     for (int i = 0; i < N_DIMENSION; i++) {
       get_gradient(pts[i], gradient_tilde[i]);
@@ -533,7 +533,7 @@ void cyc_matrix_inverse() {
 	threads[j].join();
       }
       for (int j = 0; j < NTHREAD; j++) {
-	  thread_batch_on[j] = 0;
+	thread_batch_on[j] = 0;
       }
     }
     GAMMA *= GAMMA_REDUCTION;
@@ -541,7 +541,7 @@ void cyc_matrix_inverse() {
     
     //Shuffle
     for (int ii = 0; ii < NTHREAD; ii++) {
-      //random_shuffle(order[ii].begin(), order[ii].end());
+      random_shuffle(order[ii].begin(), order[ii].end());
     }
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -617,11 +617,7 @@ void hog_matrix_inverse() {
 
     
     for (int j = 0; j < NTHREAD; j++) {
-      int rand_seed = rand();
-      srand(rand_seed);
       random_shuffle(access_pattern[j].begin(), access_pattern[j].end());
-      srand(rand_seed);
-      random_shuffle(order[j].begin(), order[j].end());
     }
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
