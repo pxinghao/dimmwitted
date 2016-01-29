@@ -17,9 +17,9 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 2000
+#define N_DIMENSION 100
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
-#define NUM_SPARSE_ELEMENTS_IN_ROW 20
+#define NUM_SPARSE_ELEMENTS_IN_ROW 5
 
 #ifndef NTHREAD
 #define NTHREAD 8
@@ -32,7 +32,7 @@
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 100
+#define BATCH_SIZE 500
 #endif
 
 #ifndef HOG
@@ -44,7 +44,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -74,6 +74,9 @@ double model[N_DIMENSION];
 double B[N_DIMENSION];
 double C = 0; //1 / (frobenius norm of matrix)^2
 double LAMBDA = 0;
+
+//precompute sum of powers of lambda * C
+double sum_pows[N_DIMENSION];
 
 //double gradient_tilde[N_DIMENSION][N_DIMENSION];
 double **gradient_tilde;
@@ -153,7 +156,7 @@ double compute_loss(vector<DataPoint> &pts) {
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
-
+  return;
     memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
     for (int i = 0; i < N_DIMENSION; i++) {
       get_gradient(pts[i], gradient_tilde[i]);
@@ -194,7 +197,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	int row = p.first;
 	map<int, double> sparse_array = p.second;
 	int update_order = order[indx];
-
 	
 	if (!SVRG) {
 	  double out[N_DIMENSION];
@@ -217,12 +219,9 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	else {
 	  //catch up
 	  for (auto const &x : sparse_array) {
-	    double diff = update_order - bookkeeping[x.first] - 1;
-	    if (diff <= 0) diff = 0;
-	    double sum = 0;
-	    for (int j = 0; j < diff; j++) {
-	      sum += pow(1 - LAMBDA * GAMMA * C,  j);
-	    }
+	    int diff = update_order - bookkeeping[x.first] - 1;
+	    diff = max(diff, 0);
+	    double sum = sum_pows[(int)diff];
 	    double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
 	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
 	    model[x.first] = first_part + second_part;
@@ -452,6 +451,13 @@ vector<DataPoint> get_sparse_matrix() {
     for (int i = 0; i < N_DIMENSION; i++) {
       LAMBDA += x_k_prime[i] * 1.1 * x_3_norm;
     }
+
+    //precompute sum of powers
+    sum = 0;
+    for (int j = 0; j < N_DIMENSION; j++) {
+      sum += pow(1 - LAMBDA * GAMMA * C,  j);
+      sum_pows[j] = sum;
+    }
     
     return sparse_matrix;
 }
@@ -460,6 +466,7 @@ void cyc_matrix_inverse() {
   vector<DataPoint> points = get_sparse_matrix();
   initialize_model();
   random_shuffle(points.begin(), points.end());
+  vector<DataPoint> points_copy(points);
 
   Timer overall;
 
@@ -508,7 +515,6 @@ void cyc_matrix_inverse() {
   for (int i = 0; i < N_EPOCHS; i++) {
 
     calculate_gradient_tilde(points);
-
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
       cout << compute_loss(points) << " " << overall.elapsed()-copy_time << " " << gradient_time.elapsed()-copy_time << endl;
@@ -534,7 +540,9 @@ void cyc_matrix_inverse() {
     clear_bookkeeping();
     
     //Shuffle
-    random_shuffle(batch_pattern.begin(), batch_pattern.end());
+    for (int ii = 0; ii < NTHREAD; ii++) {
+      //random_shuffle(order[ii].begin(), order[ii].end());
+    }
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
