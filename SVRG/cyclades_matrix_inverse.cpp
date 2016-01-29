@@ -10,18 +10,18 @@
 #include <map>
 #include <unistd.h>
 #include <set>
-//#include <numa.h>
+#include <numa.h>
 #include <sched.h>
 #include <iomanip>
 #include <mutex>
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 1000
-#define NUM_SPARSE_ELEMENTS_IN_ROW 20
+#define N_DIMENSION 10000
+#define NUM_SPARSE_ELEMENTS_IN_ROW 5
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
@@ -29,7 +29,7 @@
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 10000000
+#define BATCH_SIZE 100
 #endif
 
 #ifndef HOG
@@ -41,7 +41,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
 #endif
 
 #if HOG == 1
@@ -73,7 +73,8 @@ double norm_row[N_DIMENSION];
 double C = 0; //1 / (frobenius norm of matrix)^2
 double LAMBDA = 0;
 
-double gradient_tilde[N_DIMENSION][N_DIMENSION];
+//double gradient_tilde[N_DIMENSION][N_DIMENSION];
+double **gradient_tilde;
 double sum_gradient_tilde[N_DIMENSION];
 double model_tilde[N_DIMENSION];
 
@@ -97,10 +98,10 @@ struct Comp
 };
 
 void pin_to_core(size_t core) {
-    //cpu_set_t cpuset;
-    //CPU_ZERO(&cpuset);
-    //CPU_SET(core, &cpuset);
-    //pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(core, &cpuset);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
 void get_gradient(DataPoint &p, double *out) {
@@ -130,8 +131,9 @@ double compute_loss(vector<DataPoint> &pts) {
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
+  return;
     memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
-
+    
     for (int i = 0; i < N_DIMENSION; i++) {
 	get_gradient(pts[i], gradient_tilde[i]);
     }
@@ -171,49 +173,50 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	map<int, double> sparse_array = p.second;
 	int update_order = order[indx];
 
+	
 	if (!SVRG) {
-	    double out[N_DIMENSION];
-	    double ai_t_x = 0;
-	    for (int i = 0; i < N_DIMENSION; i++) {
-		double weight = 0;
-		if (p.second.find(i) != p.second.end()) weight = p.second[i];
-		ai_t_x += weight * model[i];
-		out[i] = LAMBDA * C * model[i];
-	    }
-	    for (int i = 0; i < N_DIMENSION; i++) {
+	  double out[N_DIMENSION];
+	  double ai_t_x = 0;
+	  for (int i = 0; i < N_DIMENSION; i++) {
+	    double weight = 0;
+	    if (p.second.find(i) != p.second.end()) weight = p.second[i];
+	    ai_t_x += weight * model[i];
+	    out[i] = LAMBDA * C * model[i];
+	  }
+	  for (int i = 0; i < N_DIMENSION; i++) {
 		double weight = 0;
 		if (p.second.find(i) != p.second.end()) weight = p.second[i];
 		out[i] -= ai_t_x * weight + B[i] / N_DIMENSION;
-	    }
-	    for (int i = 0; i < N_DIMENSION; i++) {
-		model[i] -= GAMMA * out[i];
-	    }
+	  }
+	  for (int i = 0; i < N_DIMENSION; i++) {
+	    model[i] -= GAMMA * out[i];
+	  }
 	}
 	else {
-	    //catch up
-	    for (auto const &x : sparse_array) {
-		double diff = update_order - bookkeeping[x.first] - 1;
-		//if (x.first == 390) cout << "hi " << " " << diff << endl;
-		double sum = 0;
-		for (int j = 0; j < diff; j++) {
-		    sum += pow(1 - LAMBDA * GAMMA * C,  j);
-		}
-		double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
-		double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
-		model[x.first] = first_part + second_part;
+	  //catch up
+	  for (auto const &x : sparse_array) {
+	    double diff = update_order - bookkeeping[x.first] - 1;
+	    if (diff <= 0) diff = 0;
+	    double sum = 0;
+	    for (int j = 0; j < diff; j++) {
+	      sum += pow(1 - LAMBDA * GAMMA * C,  j);
 	    }
-
+	    double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
+	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
+	    model[x.first] = first_part + second_part;
+	  }
+	  
 	    //Compute gradient
-	    double ai_t_x = 0;
-	    for (auto const &x : sparse_array) {
-		ai_t_x += model[x.first] * x.second;
-	    }
-	    double ai_ai_t_x = 0;
-	    for (auto const &x : sparse_array) {
-		double gradient = C * LAMBDA * model[x.first] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
-		model[x.first] -= GAMMA * (gradient - gradient_tilde[row][x.first] + sum_gradient_tilde[x.first] / N_DIMENSION);
-		bookkeeping[x.first] = update_order;
-	    }
+	  double ai_t_x = 0;
+	  for (auto const &x : sparse_array) {
+	    ai_t_x += model[x.first] * x.second;
+	  }
+	  double ai_ai_t_x = 0;
+	  for (auto const &x : sparse_array) {
+	    double gradient = C * LAMBDA * model[x.first] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
+	    model[x.first] -= GAMMA * (gradient - gradient_tilde[row][x.first] + sum_gradient_tilde[x.first] / N_DIMENSION);
+	    bookkeeping[x.first] = update_order;
+	  }
 	}
     }
   }
@@ -254,10 +257,10 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   }
   avg_cc_size /= (double)ccs.size();
 
-  /*for (int i = 0; i < balances.size(); i++) {
+  for (int i = 0; i < balances.size(); i++) {
     cout << balances[i].second << " ";
   }
-  cout << endl;*/
+  cout << endl;
 
   //Allocate memory
   int index_count[NTHREAD];
@@ -555,7 +558,7 @@ void hog_matrix_inverse() {
   float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-
+    
     calculate_gradient_tilde(points);
 
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -594,6 +597,11 @@ int main(void) {
   std::cout << std::setprecision(20);
   pin_to_core(0);
 
+  gradient_tilde = (double **)malloc(sizeof(double *) * N_DIMENSION);
+  for (int i = 0; i < N_DIMENSION; i++) {
+    gradient_tilde[i] = (double *)malloc(sizeof(double) * N_DIMENSION);
+  }
+
   /*sum_gradients = (double **)malloc(sizeof(double *) * N_DIMENSION);
   //model = (double **)malloc(sizeof(double *) * N_DIMENSION);
   for (int i = 0; i < N_DIMENSION; i++) {
@@ -608,7 +616,7 @@ int main(void) {
     }
     }*/
 
-  /*//Create a map from core/thread -> node
+  //Create a map from core/thread -> node
   for (int i = 0; i < NTHREAD; i++) core_to_node[i] = -1;
   int num_cpus = numa_num_task_cpus();
   struct bitmask *bm = numa_bitmask_alloc(num_cpus);
@@ -619,7 +627,7 @@ int main(void) {
 	core_to_node[j] = i;
       }
     }
-    }*/
+  }
 
   //Clear miscellaneous datastructures for CC load balancing
   for (int i = 0; i < NTHREAD; i++) {
