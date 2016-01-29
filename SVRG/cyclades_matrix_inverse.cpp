@@ -17,7 +17,8 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 10000
+#define N_DIMENSION 2000
+#define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 5
 
 #ifndef NTHREAD
@@ -41,7 +42,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -75,6 +76,7 @@ double LAMBDA = 0;
 
 //double gradient_tilde[N_DIMENSION][N_DIMENSION];
 double **gradient_tilde;
+//double gradient_tilde
 double sum_gradient_tilde[N_DIMENSION];
 double model_tilde[N_DIMENSION];
 
@@ -120,22 +122,40 @@ void get_gradient(DataPoint &p, double *out) {
 }
 
 double compute_loss(vector<DataPoint> &pts) {
-    double loss = 0;
-    for (int i = 0; i < N_DIMENSION; i++) {
-	double grad[N_DIMENSION];
-	get_gradient(pts[i], grad);
-	for (int i = 0; i < N_DIMENSION; i++)
-	    loss += grad[i] * grad[i];
+  //Compute gradient loss
+  /*double loss = 0;
+  for (int i = 0; i < N_DIMENSION; i++) {
+    double grad[N_DIMENSION];
+    get_gradient(pts[i], grad);
+    for (int i = 0; i < N_DIMENSION; i++)
+      loss += grad[i] * grad[i];
+  }
+  return loss / N_DIMENSION;*/
+  double loss = 0;
+  double second = 0;
+  double sum_sqr = 0;
+  for (int j = 0; j < N_DIMENSION; j++) {
+    second += model[j] * B[j];
+    sum_sqr += model[j] * model[j];
+  }
+  for (int i = 0; i < pts.size(); i++) {
+    double ai_t_x = 0;
+    map<int, double> sparse_row = pts[i].second;
+    double first = sum_sqr * C * LAMBDA;
+    for (auto const & element : sparse_row) {
+      ai_t_x += model[element.first] * element.second;      
     }
-    return loss / N_DIMENSION;
+    first -= ai_t_x * ai_t_x;
+    loss += .5 * first - 1/(double)N_DIMENSION * second;
+  }
+  return loss;
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
-  return;
+
     memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
-    
     for (int i = 0; i < N_DIMENSION; i++) {
-	get_gradient(pts[i], gradient_tilde[i]);
+      get_gradient(pts[i], gradient_tilde[i]);
     }
 
     for (int i = 0; i < N_DIMENSION; i++) {
@@ -206,7 +226,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	    model[x.first] = first_part + second_part;
 	  }
 	  
-	    //Compute gradient
+	  //Compute gradient
 	  double ai_t_x = 0;
 	  for (auto const &x : sparse_array) {
 	    ai_t_x += model[x.first] * x.second;
@@ -599,7 +619,7 @@ int main(void) {
 
   gradient_tilde = (double **)malloc(sizeof(double *) * N_DIMENSION);
   for (int i = 0; i < N_DIMENSION; i++) {
-    gradient_tilde[i] = (double *)malloc(sizeof(double) * N_DIMENSION);
+    gradient_tilde[i] = (double *)malloc(sizeof(double) * N_DIMENSION_CACHE_ALIGNED);
   }
 
   /*sum_gradients = (double **)malloc(sizeof(double *) * N_DIMENSION);
