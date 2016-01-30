@@ -95,8 +95,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                             for n in range(n_rep):
                                 print("Iteration %d of %d" % (cur_iter, total_iter))
                                 cur_iter += 1
-                                output = run_command_with_params_and_get_output(c, ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+\
-                                                                                    str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"])
+                                params =  ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "K="+str(r), "SHOULD_SYNC="+ str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"]
+                                if gammas != None:
+                                    params.append("START_GAMMA="+str(gammas[i]))
+                                output = run_command_with_params_and_get_output(c, params)
                                 values = [float(x) for x in output]
                                 if n == 0:
                                     losses = [values[i] for i in range(0, len(values), 3)]
@@ -130,13 +132,16 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     for i, c in enumerate(commands):
                         times = overall_time_values[c][epoch_range][b][t][r][s]
                         losses = loss_values[c][epoch_range][b][t][r][s]
-                        print(c)
-                        print(losses)
+                        name = c
+                        if 'hog' not in c:
+                            name += " sync="+str(s)
+                        if gammas != None:
+                            name += " gamma="+str(gammas[i])
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c)
+                                plt.plot(times, losses, label=name)
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s))
+                            plt.plot(times, losses, label=name)
                 plt.yscale('log')
                 #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
@@ -155,11 +160,16 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     for i, c in enumerate(commands):
                         times = gradient_time_values[c][epoch_range][b][t][r][s]
                         losses = loss_values[c][epoch_range][b][t][r][s]
+                        name = c
+                        if 'hog' not in c:
+                            name += " sync="+str(s)
+                        if gammas != None:
+                            name += " gamma="+str(gammas[i])
                         if 'hog' in c:
                             if s:
-                                plt.plot(times, losses, label=c)
+                                plt.plot(times, losses, label=name)
                         else:
-                            plt.plot(times, losses, label=c+" sync="+str(s))
+                            plt.plot(times, losses, label=name)
                 plt.yscale('log')
                 #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
@@ -178,32 +188,39 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     for i, c in enumerate(commands):
                         epochs = range(0, epoch_range)
                         losses = loss_values[c][epoch_range][b][t][r][s]
+                        name = c
+                        if 'hog' not in c:
+                            name += " sync="+str(s)
+                        if gammas != None:
+                            name += " gamma="+str(gammas[i])
                         if 'hog' in c:
                             if s:
-                                plt.plot(epochs, losses, label=c)
+                                plt.plot(epochs, losses, label=name)
                         else:
-                            plt.plot(epochs, losses, label=c+" sync="+str(s))
+                            plt.plot(epochs, losses, label=name)
                 plt.yscale('log')
                 #plt.xscale('log')
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
     
-    hog_command = [x for x in commands if 'hog' in x]
+    hog_command = [(x,i) for i,x in enumerate(commands) if 'hog' in x]
     if len(hog_command) != 0:
-        hog_command = hog_command[0]
+        hog_command, hog_index = hog_command[0]
     else:
         return
     for b in batch_size_range:
         for t in thread_range:
             for r in rank_range:
                 title = "Gradient_Time_Loss_Ratios_batch=%d_thread=%d_rank=%d" % (b, t, r)
+                if gammas != None:
+                    title += "hog_gamma="+str(gammas[hog_index])
                 plt.figure()
                 plt.title(title, fontsize=12)
                 plt.xlabel("Time")
                 plt.ylabel("hog_loss/cyc_loss")
                 for s in sync_range:
-                    for i,c in enumerate(commands):
+                    for ind,c in enumerate(commands):
                         if c == hog_command:
                             continue
                         hog_times = gradient_time_values[hog_command][epoch_range][b][t][r][s]
@@ -220,7 +237,10 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                                 best_loss = min(best_loss, cyc_losses[i2])
                             cyc_losses_aligned.append(best_loss)
                         loss_ratio = [hog_losses[i] / cyc_losses_aligned[i] for i in range(len(hog_losses))]
-                        plt.plot(hog_times, loss_ratio, label=c+" sync="+str(s))
+                        name = c + " sync="+str(s)
+                        if gammas != None:
+                            name += " gamma="+str(gammas[ind])
+                        plt.plot(hog_times, loss_ratio, label=name)
                 plt.legend(loc="upper right", fontsize=8)
                 plt.savefig(title + ".png")
                 plt.clf()
@@ -511,4 +531,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
     
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
-draw_time_loss_graph(0, 200, [4250], [1, 4, 8, 16, 32], [30, 100], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"], 3);
+#draw_time_loss_graph(0, 200, [4250], [1, 4, 8, 16, 32], [30, 100], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"], 3);
+
+draw_time_loss_graph(0, 200, [520], [8], [30], [1], ["cyc_word_embeddings_cyc_saga", "cyc_word_embeddings_hog_saga", "cyc_word_embeddings_hog_saga_diverge"], 1, [1e-7, 3e-11, 1e-10]);

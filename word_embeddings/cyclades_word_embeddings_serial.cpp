@@ -17,14 +17,14 @@
 #include <iostream>
 #define K 30
 
-#define N_EPOCHS 50
-//#define WORD_EMBEDDINGS_FILE "sparse_graph"
+#define N_EPOCHS 200
+#define WORD_EMBEDDINGS_FILE "sparse_graph"
 //#define N_NODES 111
-#define WORD_EMBEDDINGS_FILE "mat_comp_dat"
-#define N_NODES 6036
-#define N_DATAPOINTS 1124
+//#define WORD_EMBEDDINGS_FILE "mat_comp_dat"
+#define N_NODES 105
+#define N_DATAPOINTS 1096
 #ifndef SHUFFLE
-#define SHUFFLE 1
+#define SHUFFLE 0
 #endif
 
 #ifndef SAGA
@@ -34,9 +34,9 @@
 double sum_grad[N_NODES][K], prev_grad[N_DATAPOINTS][N_NODES][K];
 double model[N_NODES][K] __attribute__((aligned(64)));
 int terminal_nodes[K];
-double GAMMA = 1e-4; //SAGA
+double GAMMA = 2e-3; //SAGA
 //double GAMMA = 4e-4; //SAGA
-//double GAMMA = 1e-3; //SGD
+//double GAMMA = 3e-3; //SGD
 double C = 0;
 
 using namespace std;
@@ -137,10 +137,9 @@ int main(void) {
   std::cout << std::fixed << std::showpoint;
   std::cout << std::setprecision(20);
 
-  //vector<DataPoint> pts = get_word_embeddings_data();
-  vector<DataPoint> pts = get_mat_compl_data();
-  random_shuffle(pts.begin(), pts.end());
+  vector<DataPoint> pts = get_word_embeddings_data();
   initialize_model();
+  //random_shuffle(pts.begin(), pts.end());
 
   for (int i = 0; i < N_NODES; i++) {
     for (int j = 0; j < K; j++) {
@@ -214,19 +213,21 @@ int main(void) {
 	for (int j = 0; j < K; j++) {
 	  
 	  if (SAGA) {
-	    /*//Full gradient = (cur_grad - prev_grad + sum_grad) / n
-	    full_gradient[i][j] = (gradient[i][j] - prev_grad[pt_index][i][j] + sum_grad[i][j] / N_DATAPOINTS);
-	    //Update model
-	    model[i][j] -= GAMMA * full_gradient[i][j];
-	    //Update sum
-	    sum_grad[i][j] += -prev_grad[pt_index][i][j] + gradient[i][j];
-	    //Update previous gradient
-	    prev_grad[pt_index][i][j] = gradient[i][j];*/
-	    sum_grad[i][j] -= prev_grad[pt_index][i][j];
-	    prev_grad[pt_index][i][j] = gradient[i][j];
-	    sum_grad[i][j] += gradient[i][j];
-	    double div = min(N_DATAPOINTS, n_datapoints_seen);
-	    model[i][j] -= GAMMA / (double)div * sum_grad[i][j];
+	    if (epoch != 0) {
+	      //Full gradient = (cur_grad - prev_grad + sum_grad) / n
+	      full_gradient[i][j] = (gradient[i][j] - prev_grad[pt_index][i][j] + sum_grad[i][j] / N_DATAPOINTS);
+	      //Update model
+	      model[i][j] -= GAMMA * full_gradient[i][j];
+	      //Update sum
+	      sum_grad[i][j] += -prev_grad[pt_index][i][j] + gradient[i][j];
+	      //Update previous gradient
+	      prev_grad[pt_index][i][j] = gradient[i][j];
+	    }
+	    else {
+	      model[i][j] -= GAMMA * gradient[i][j];
+	      sum_grad[i][j] += -prev_grad[pt_index][i][j] + gradient[i][j];
+	      prev_grad[pt_index][i][j] = gradient[i][j];
+	    }
 	  }
 	  else {
 	    model[i][j] -= GAMMA * gradient[i][j];

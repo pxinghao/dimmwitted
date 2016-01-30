@@ -16,26 +16,29 @@
 #include <mutex> 
 #include <omp.h>
 
-#define WORD_EMBEDDINGS_FILE "full_graph"
+#define WORD_EMBEDDINGS_FILE "small_graph"
 //#define N_NODES 628
 //#define N_DATAPOINTS 5607
 //#define N_NODES 3822
 //#define N_DATAPOINTS 80821
-#define N_NODES 213271
-#define N_DATAPOINTS 20207156
-//#define N_NODES 628
-//#define N_DATAPOINTS 10020
+//#define N_NODES 213271
+//#define N_DATAPOINTS 20207156
+#define N_NODES 16774
+#define N_DATAPOINTS 622941
+//#define N_NODES 105
+//#define N_DATAPOINTS 1096
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 100
 #endif 
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 4250 //full 80 mb
+//#define BATCH_SIZE 4250 //full 80 mb
+#define BATCH_SIZE 520
 //#define BATCH_SIZE 2000 //1/10 of 80 mb SGD
 //#define BATCH_SIZE 490
 #endif
@@ -49,7 +52,7 @@
 #endif
 
 #ifndef SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH
-#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 0
+#define SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH 1
 #endif
 
 #if HOG == 1
@@ -65,14 +68,19 @@
 #endif
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
-#ifndef SAG
-#define SAG 0
+#ifndef SAGA
+#define SAGA 1
 #endif
 
 #ifndef START_GAMMA
 //#define START_GAMMA 2.3e-4//3.42e-5
-//#define START_GAMMA 9e-6 // SAG
-#define START_GAMMA 1e-10 // SG
+//#define START_GAMMA 5e-7 // SGD CYC/HOG
+//#define START_GAMMA 1e-7 // SAGA CYC
+//#define START_GAMMA 3e-11 // SAGA HOG
+#define START_GAMMA 1e-10 //SAGA HOG DIVERGE
+//#define START_GAMMA 1e-10 // SG
+
+//#define START_GAMMA 1e-4 //Test
 #endif
 
 double volatile C = 0;
@@ -143,7 +151,7 @@ void update_coords() {
 }
 
 void clear_bookkeeping() {
-  if (SAG) {
+  if (SAGA) {
     update_coords();
     for (int i = 0; i < N_NODES; i++) {
       bookkeeping[i] = 0;
@@ -241,7 +249,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       if (diff_x <= 0) diff_x = 0;
       if (diff_y <= 0) diff_y = 0;
 
-      if (SAG) {
+      if (SAGA) {
 	for (int j = 0; j < K; j++) {
 	  model[x][j] -=  (double)GAMMA * diff_x * sum_gradients[x][j] / N_DATAPOINTS;
 	  model[y][j] -=  (double)GAMMA * diff_y * sum_gradients[y][j] / N_DATAPOINTS;
@@ -273,7 +281,7 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
 	double gradient =  -1 * (mult * 2 * (model[x][j] + model[y][j]));
 	//double gradient = r * 2 * (model[x][j] - model[y][j]);
 	
-	if (SAG) {
+	if (SAGA) {
 	  
 	  /*model[x][j] -= GAMMA * (gradient - prevv_gradients[oorder[x][y]][j*2] + sum_gradients[x][j]) / min(n_datapoints_seen, N_DATAPOINTS);
 	  sum_gradients[x][j] += gradient - prevv_gradients[oorder[x][y]][j*2];
@@ -610,7 +618,6 @@ void cyc_word_embeddings() {
       }
     }
     C = C_A / C_B;
-    
     GAMMA *= GAMMA_REDUCTION;
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
