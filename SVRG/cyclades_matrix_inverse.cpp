@@ -17,7 +17,7 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 1000
+#define N_DIMENSION 100000
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
@@ -193,6 +193,7 @@ void calculate_gradient_tilde(vector<DataPoint> &pts) {
 }
 
 void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, vector<int> &batch_pattern) {
+
   pin_to_core(thread_id);
   for (int batch_iter = 0; batch_iter < access_length.size(); batch_iter++) {
     int batch = batch_pattern[batch_iter];
@@ -384,11 +385,8 @@ void initialize_model() {
 
 void update_coords() {
     for (int i = 0; i < N_DIMENSION; i++) {
-	double diff = N_DIMENSION - bookkeeping[i];
-	double sum = 0;
-	for (int j = 0; j < diff; j++) {
-	    sum += pow(1 - GAMMA * LAMBDA * C, j);
-	}
+	int diff = N_DIMENSION - bookkeeping[i];
+	double sum = sum_pows[diff];
 	double first_part = model[i] * pow(1 - LAMBDA * C * GAMMA, diff);
 	double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
 	model[i] = first_part + second_part;
@@ -396,12 +394,12 @@ void update_coords() {
 }
 
 void clear_bookkeeping() {
-    if (SVRG) {
-	update_coords();
-	for (int i = 0; i < N_DIMENSION; i++) {
-	    bookkeeping[i] = 0;
-	}
+  if (SVRG) {
+    update_coords();
+    for (int i = 0; i < N_DIMENSION; i++) {
+      bookkeeping[i] = 0;
     }
+  }
 }
 
 void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
@@ -545,7 +543,6 @@ void cyc_matrix_inverse() {
   float copy_time = 0;
   Timer gradient_time;
   for (int i = 0; i < N_EPOCHS; i++) {
-
     calculate_gradient_tilde(points);
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
@@ -569,6 +566,7 @@ void cyc_matrix_inverse() {
       }
     }
     GAMMA *= GAMMA_REDUCTION;
+    
     clear_bookkeeping();
     
     //Shuffle
