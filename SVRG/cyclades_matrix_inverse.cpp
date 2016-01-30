@@ -17,7 +17,7 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 10000
+#define N_DIMENSION 1000
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
@@ -28,11 +28,11 @@
 #define RANGE 100000
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 10
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 1000
+#define BATCH_SIZE 100
 #endif
 
 #ifndef HOG
@@ -220,7 +220,6 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	  //catch up
 	  for (auto const &x : sparse_array) {
 	    int diff = update_order - bookkeeping[x.first] - 1;
-	    diff = max(diff, 0);
 	    double sum = sum_pows[(int)diff];
 	    double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
 	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
@@ -540,9 +539,28 @@ void cyc_matrix_inverse() {
     clear_bookkeeping();
     
     //Shuffle
-    for (int ii = 0; ii < NTHREAD; ii++) {
-      random_shuffle(order[ii].begin(), order[ii].end());
+    //for (int ii = 0; ii < NTHREAD; ii++) {
+    //random_shuffle(order[ii].begin(), order[ii].end());
+    //}
+    
+    /*for (int ii = 0; ii < NTHREAD; ii++) {
+      thread_load_balance[ii] = 0;
+      cur_datapoints_used[ii] = 0;
     }
+    
+    random_shuffle(points_copy.begin(), points_copy.end());
+    
+    //#pragma omp parallel for
+    for (int ii = 0; ii < n_batches; ii++) {
+      int start = ii * BATCH_SIZE;
+      int end = min((ii+1)*BATCH_SIZE, (int)points_copy.size());
+      CCs[ii].clear();
+      compute_CC_thread(CCs[ii], points_copy, start, end, omp_get_thread_num());
+    }
+    
+    for (int ii = 0; ii < n_batches; ii++) {
+      distribute_ccs(CCs[ii], access_pattern, access_length, batch_index_start, ii, points_copy, order);
+      }*/
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -616,9 +634,9 @@ void hog_matrix_inverse() {
     clear_bookkeeping();
 
     
-    for (int j = 0; j < NTHREAD; j++) {
+    /*for (int j = 0; j < NTHREAD; j++) {
       random_shuffle(access_pattern[j].begin(), access_pattern[j].end());
-    }
+      }*/
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -631,7 +649,7 @@ int main(void) {
   omp_set_num_threads(NTHREAD);
   srand(0);
   std::cout << std::fixed << std::showpoint;
-  std::cout << std::setprecision(20);
+  std::cout << std::setprecision(10);
   pin_to_core(0);
 
   gradient_tilde = (double **)malloc(sizeof(double *) * N_DIMENSION);

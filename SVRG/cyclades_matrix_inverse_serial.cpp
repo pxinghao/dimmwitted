@@ -32,7 +32,7 @@ double norm_row[N_DIMENSION];
 double C = 0; //1 / (frobenius norm of matrix)^2
 double LAMBDA = 0;
 //double GAMMA = 2e-15;
-double GAMMA = 2e-9;
+double GAMMA = 2e-13;
 
 double gradient_tilde[N_DIMENSION][N_DIMENSION];
 double sum_gradient_tilde[N_DIMENSION];
@@ -175,7 +175,13 @@ int main(void) {
     for (int epoch = 0; epoch < N_EPOCHS; epoch++) {
 	calculate_gradient_tilde(sparse_matrix);
 	cout << compute_loss(sparse_matrix) << endl;
-	for (int row = 0; row < sparse_matrix.size(); row++) {
+	vector<int> random_pattern;
+	for (int i = 0; i < sparse_matrix.size(); i++) 
+	  random_pattern.push_back(i);
+	random_shuffle(random_pattern.begin(), random_pattern.end());
+	//for (int row = 0; row < sparse_matrix.size(); row++) {
+	for (int access = 0; access < random_pattern.size(); access++) {
+	    int row = random_pattern[access];
 	    DataPoint sparse_row = sparse_matrix[row];
 	    double gradient[N_DIMENSION];
 	    get_gradient(sparse_row, gradient);
