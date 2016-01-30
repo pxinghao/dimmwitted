@@ -28,7 +28,7 @@
 #define RANGE 100000
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 5
 #endif
 
 #ifndef BATCH_SIZE
@@ -56,7 +56,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-9
+#define START_GAMMA 2e-10
 #endif
 
 #ifndef SVRG
@@ -74,13 +74,12 @@ double model[N_DIMENSION];
 double B[N_DIMENSION];
 double C = 0; //1 / (frobenius norm of matrix)^2
 double LAMBDA = 0;
+double num_zeroes_in_column[N_DIMENSION];
 
 //precompute sum of powers of lambda * C
 double sum_pows[N_DIMENSION];
 
 //double gradient_tilde[N_DIMENSION][N_DIMENSION];
-double **gradient_tilde;
-//double gradient_tilde
 double sum_gradient_tilde[N_DIMENSION];
 double model_tilde[N_DIMENSION];
 
@@ -157,17 +156,40 @@ double compute_loss(vector<DataPoint> &pts) {
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
 
-    memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
-    for (int i = 0; i < N_DIMENSION; i++) {
-      get_gradient(pts[i], gradient_tilde[i]);
-    }
+  //Copy model
+  memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
 
-    for (int i = 0; i < N_DIMENSION; i++) {
-	sum_gradient_tilde[i] = 0;
-	for (int j = 0; j < N_DIMENSION; j++) {
-	    sum_gradient_tilde[i] += gradient_tilde[j][i];
-	}
+  //Reset sum of gradients
+  for (int j = 0; j < N_DIMENSION; j++) {
+    sum_gradient_tilde[j] = 0;
+  }
+  
+  //Calculate sum of gradient tildes
+  /*double gradient_tilde[N_DIMENSION];
+  for (int i = 0; i < N_DIMENSION; i++) {
+    get_gradient(pts[i], gradient_tilde);
+    for (int j = 0; j < N_DIMENSION; j++) {
+      sum_gradient_tilde[j] += gradient_tilde[j];
     }
+    }*/
+
+  //Calculate sum of gradient tildes
+  for (int i = 0; i < pts.size(); i++) {
+    double ai_t_x = 0;
+    map<int, double> sparse_row = pts[i].second;
+    for (auto const & x : sparse_row) {
+      ai_t_x += model_tilde[x.first] * x.second;
+    }
+    for (auto const & x : sparse_row) {
+      sum_gradient_tilde[x.first] +=  (C * LAMBDA * model_tilde[x.first] - x.second * ai_t_x) - B[x.first] / N_DIMENSION;
+    }
+  }
+
+  //Sum the rest of the zeroes in the columns
+  for (int i = 0; i < N_DIMENSION; i++) {
+    int n_zeroes = num_zeroes_in_column[i];
+    sum_gradient_tilde[i] += (C * LAMBDA * model_tilde[i] - B[i] / N_DIMENSION) * n_zeroes;
+  }
 }
 
 void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<int> &access_length, vector<int> &batch_index_start, vector<int> &order, int thread_id, vector<int> &batch_pattern) {
@@ -227,14 +249,16 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	  }
 	  
 	  //Compute gradient
-	  double ai_t_x = 0;
+	  double ai_t_x = 0, ai_t_x_tilde = 0;
 	  for (auto const &x : sparse_array) {
 	    ai_t_x += model[x.first] * x.second;
+	    ai_t_x_tilde += model_tilde[x.first] * x.second;
 	  }
 	  double ai_ai_t_x = 0;
 	  for (auto const &x : sparse_array) {
 	    double gradient = C * LAMBDA * model[x.first] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
-	    model[x.first] -= GAMMA * (gradient - gradient_tilde[row][x.first] + sum_gradient_tilde[x.first] / N_DIMENSION);
+	    double gradient_tilde_val = C * LAMBDA * model_tilde[x.first] - ai_t_x_tilde - B[x.first] / N_DIMENSION;  
+	    model[x.first] -= GAMMA * (gradient - gradient_tilde_val + sum_gradient_tilde[x.first] / N_DIMENSION);
 	    bookkeeping[x.first] = update_order;
 	  }
 	}
@@ -393,11 +417,20 @@ void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
 vector<DataPoint> get_sparse_matrix() {
     vector<DataPoint> sparse_matrix;
 
+    //Initialize # of zeroes in columns
+    for (int i = 0; i < N_DIMENSION; i++) {
+      num_zeroes_in_column[i] = N_DIMENSION;
+    }
+
     //Randomize the sparse matrix
     for (int i = 0; i < N_DIMENSION; i++) {
       DataPoint p = DataPoint(i, map<int, double>());
       for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
-	p.second[rand() % N_DIMENSION] = rand() % RANGE;
+	int column = rand() % N_DIMENSION;
+	if (p.second.find(column) == p.second.end()) {
+	  p.second[column] = rand() % RANGE;
+	  num_zeroes_in_column[column]--;
+	}
       } 
       sparse_matrix.push_back(p);
     }
@@ -651,11 +684,6 @@ int main(void) {
   std::cout << std::fixed << std::showpoint;
   std::cout << std::setprecision(10);
   pin_to_core(0);
-
-  gradient_tilde = (double **)malloc(sizeof(double *) * N_DIMENSION);
-  for (int i = 0; i < N_DIMENSION; i++) {
-    gradient_tilde[i] = (double *)malloc(sizeof(double) * N_DIMENSION_CACHE_ALIGNED);
-  }
 
   /*sum_gradients = (double **)malloc(sizeof(double *) * N_DIMENSION);
   //model = (double **)malloc(sizeof(double *) * N_DIMENSION);
