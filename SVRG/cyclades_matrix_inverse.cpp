@@ -17,7 +17,8 @@
 #include <omp.h>
 #include <cmath>
 
-#define N_DIMENSION 100000
+#define MATRIX_DATA_FILE "cit-HepPh.txt"
+#define N_DIMENSION 34547
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
@@ -25,7 +26,7 @@
 #define NTHREAD 8
 #endif
 
-#define RANGE 100000
+#define RANGE 10
 
 #ifndef N_EPOCHS
 #define N_EPOCHS 5
@@ -56,7 +57,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-10
+#define START_GAMMA 2e-20
 #endif
 
 #ifndef SVRG
@@ -377,7 +378,7 @@ void initialize_model() {
 
     //Initialize model
     for (int j = 0; j < N_DIMENSION; j++) {
-	model[j] = rand() % 100;
+	model[j] = B[j];
 	bookkeeping[j] = 0;
 	sum_gradient_tilde[j] = 0;
     }
@@ -412,27 +413,7 @@ void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
     }
 }
 
-vector<DataPoint> get_sparse_matrix() {
-    vector<DataPoint> sparse_matrix;
-
-    //Initialize # of zeroes in columns
-    for (int i = 0; i < N_DIMENSION; i++) {
-      num_zeroes_in_column[i] = N_DIMENSION;
-    }
-
-    //Randomize the sparse matrix
-    for (int i = 0; i < N_DIMENSION; i++) {
-      DataPoint p = DataPoint(i, map<int, double>());
-      for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
-	int column = rand() % N_DIMENSION;
-	if (p.second.find(column) == p.second.end()) {
-	  p.second[column] = rand() % RANGE;
-	  num_zeroes_in_column[column]--;
-	}
-      } 
-      sparse_matrix.push_back(p);
-    }
-
+void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     //Normalize the rows to be 1
     for (int i = 0; i < N_DIMENSION; i++) {
 	map<int, double> &row = sparse_matrix[i].second;
@@ -460,7 +441,7 @@ vector<DataPoint> get_sparse_matrix() {
 
     //Initialize B to be random
     for (int i = 0; i < N_DIMENSION; i++) {
-      B[i] = rand() % 100;
+      B[i] = rand() % RANGE;
     }
     
     //Compute Lambda
@@ -487,8 +468,55 @@ vector<DataPoint> get_sparse_matrix() {
     for (int j = 0; j < N_DIMENSION; j++) {
       sum += pow(1 - LAMBDA * GAMMA * C,  j);
       sum_pows[j] = sum;
+    }   
+}
+
+vector<DataPoint> get_sparse_matrix() {
+  vector<DataPoint> A(N_DIMENSION);
+  for (int i = 0; i < N_DIMENSION; i++) A[i].first = i;
+  ifstream in(MATRIX_DATA_FILE);
+  string s;
+  map<int, int> node_id_map;
+  while (getline(in, s)) {
+    stringstream linestream(s);
+    if (s[0] == '#') continue;
+    int n1, n2;
+    linestream >> n1 >> n2;
+    if (node_id_map.find(n1) == node_id_map.end())
+      node_id_map[n1] = node_id_map.size();
+    if (node_id_map.find(n2) == node_id_map.end())
+      node_id_map[n2] = node_id_map.size();
+    A[node_id_map[n1]].second[node_id_map[n2]] = 1;
+    A[node_id_map[n2]].second[node_id_map[n1]] =1;
+  }
+  
+  initialize_matrix_data(A);
+  return A;
+}
+
+vector<DataPoint> get_sparse_matrix_synthetic() {
+    vector<DataPoint> sparse_matrix;
+
+    //Initialize # of zeroes in columns
+    for (int i = 0; i < N_DIMENSION; i++) {
+      num_zeroes_in_column[i] = N_DIMENSION;
     }
-    
+
+    //Randomize the sparse matrix
+    for (int i = 0; i < N_DIMENSION; i++) {
+      DataPoint p = DataPoint(i, map<int, double>());
+      for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
+	int column = rand() % N_DIMENSION;
+	if (p.second.find(column) == p.second.end()) {
+	  p.second[column] = rand() % RANGE;
+	  num_zeroes_in_column[column]--;
+	}
+      } 
+      sparse_matrix.push_back(p);
+    }
+
+    initialize_matrix_data(sparse_matrix);
+
     return sparse_matrix;
 }
 
