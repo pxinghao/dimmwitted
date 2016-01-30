@@ -533,4 +533,4 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 
 #draw_time_loss_graph(0, 200, [4250], [1, 4, 8, 16, 32], [30, 100], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_hog_sgd"], 3);
 
-draw_time_loss_graph(0, 200, [520], [8], [30], [1], ["cyc_word_embeddings_cyc_saga", "cyc_word_embeddings_hog_saga", "cyc_word_embeddings_hog_saga_diverge"], 1, [1e-7, 3e-11, 1e-10]);
+draw_time_loss_graph(0, 200, [520], [8], [30], [1], ["cyc_word_embeddings_cyc_saga", "cyc_word_embeddings_hog_saga", "cyc_word_embeddings_hog_saga_diverge", "cyc_word_embeddings_cyc_sgd"], 1, [1e-7, 3e-11, 1e-10, 5e-7]);

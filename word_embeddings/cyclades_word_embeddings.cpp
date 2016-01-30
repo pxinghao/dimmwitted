@@ -74,7 +74,7 @@
 
 #ifndef START_GAMMA
 //#define START_GAMMA 2.3e-4//3.42e-5
-//#define START_GAMMA 5e-7 // SGD CYC/HOG
+//#define START_GAMMA 1e-6 // SGD CYC/HOG
 //#define START_GAMMA 1e-7 // SAGA CYC
 //#define START_GAMMA 3e-11 // SAGA HOG
 #define START_GAMMA 1e-10 //SAGA HOG DIVERGE
@@ -784,7 +784,6 @@ int main(void) {
   if (CYC) {
     cyc_word_embeddings();
   }
-
   //if (OUTPUT_MODEL) {
   //output_model();
     //}
