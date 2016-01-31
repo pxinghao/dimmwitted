@@ -17,16 +17,18 @@
 #include <omp.h>
 #include <cmath>
 
-//#define MATRIX_DATA_FILE "roadNet-CA.txt"
-//#define N_DIMENSION 1965207
+#define MATRIX_DATA_FILE "roadNet-CA.txt"
+#define N_DIMENSION 1965207
 //#define MATRIX_DATA_FILE "delaunay_n13/delaunay_n13.mtx"
 //#define N_DIMENSION 8193
 //#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
 //#define N_DIMENSION 2049
 //#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
 //#define N_DIMENSION 48838
-#define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
-#define N_DIMENSION 5425964
+//#define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
+//#define N_DIMENSION 5425964
+//#define MATRIX_DATA_FILE "youtube-u-growth/out.youtube-u-growth"
+//#define N_DIMENSION 3223589+1
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
@@ -72,7 +74,7 @@
 #ifndef SET_GAMMA
 //#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
 //#define START_GAMMA 3e-6 //BEST HOG SVRG
-#define SET_GAMMA 1e-4 //BEST CYC SVRG
+#define SET_GAMMA .1 //BEST CYC SVRG
 #endif
 
 #ifndef SVRG
@@ -321,9 +323,9 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   avg_cc_size /= (double)ccs.size();
 
   for (int i = 0; i < balances.size(); i++) {
-    //cout << balances[i].second << " ";
+    cout << balances[i].second << " ";
   }
-  //cout << endl;
+  cout << endl;
 
   //Allocate memory
   int index_count[NTHREAD];
@@ -459,10 +461,10 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
 
     //Initialize B to be random
     double sum_b = 0;
-    ifstream B_fin("out1");
+    //ifstream B_fin("out1");
     for (int i = 0; i < N_DIMENSION; i++) {
-      //B[i] = rand() % RANGE;
-      B_fin >> B[i];
+      B[i] = rand() % RANGE;
+      //B_fin >> B[i];
       sum_b += B[i] * B[i];
     }
     sum_b = sqrt(sum_b);
