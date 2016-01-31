@@ -37,12 +37,12 @@
 #define RANGE 10
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 5
 #endif
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 40000
+#define BATCH_SIZE 10000
 #endif
 
 #ifndef HOG
@@ -66,14 +66,20 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 1e-7
+#define START_GAMMA -1
+#endif
+
+#ifndef SET_GAMMA
+//#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
+//#define START_GAMMA 3e-6 //BEST HOG SVRG
+#define SET_GAMMA 1e-4 //BEST CYC SVRG
 #endif
 
 #ifndef SVRG
 #define SVRG 1
 #endif
 
-double GAMMA = START_GAMMA;
+double GAMMA = START_GAMMA < 0 ? SET_GAMMA : START_GAMMA;
 double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
@@ -315,9 +321,9 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   avg_cc_size /= (double)ccs.size();
 
   for (int i = 0; i < balances.size(); i++) {
-    cout << balances[i].second << " ";
+    //cout << balances[i].second << " ";
   }
-  cout << endl;
+  //cout << endl;
 
   //Allocate memory
   int index_count[NTHREAD];
@@ -453,9 +459,11 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
 
     //Initialize B to be random
     double sum_b = 0;
+    ifstream B_fin("out1");
     for (int i = 0; i < N_DIMENSION; i++) {
-      B[i] = rand() % RANGE;
-      sum_b += B[i] * B[i];; 
+      //B[i] = rand() % RANGE;
+      B_fin >> B[i];
+      sum_b += B[i] * B[i];
     }
     sum_b = sqrt(sum_b);
     for (int i = 0; i < N_DIMENSION; i++) {
@@ -780,6 +788,10 @@ int main(void) {
   if (CYC) {
     cyc_matrix_inverse();
   }
+  //for (int i = 0; i < N_DIMENSION; i++) {
+    //cout << model[i][0] << " ";
+  //}
+  cout << endl;
   //for (int i = 0; i < NTHREAD; i++)
   //cout << thread_load_balance[i] << endl;
 }
