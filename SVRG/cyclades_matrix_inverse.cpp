@@ -17,8 +17,12 @@
 #include <omp.h>
 #include <cmath>
 
-#define MATRIX_DATA_FILE "cit-HepPh.txt"
-#define N_DIMENSION 34547
+//#define MATRIX_DATA_FILE "roadNet-CA.txt"
+//#define N_DIMENSION 1965207
+#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
+#define N_DIMENSION 2049
+//#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
+//#define N_DIMENSION 48838
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
 #define NUM_SPARSE_ELEMENTS_IN_ROW 10
 
@@ -26,14 +30,14 @@
 #define NTHREAD 8
 #endif
 
-#define RANGE 10
+#define RANGE 2
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 50
 #endif
 
 #ifndef BATCH_SIZE
-#define BATCH_SIZE 100
+#define BATCH_SIZE 100000
 #endif
 
 #ifndef HOG
@@ -57,7 +61,7 @@
 #endif
 
 #ifndef START_GAMMA
-#define START_GAMMA 2e-20
+#define START_GAMMA 2e-12
 #endif
 
 #ifndef SVRG
@@ -244,7 +248,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	  //catch up
 	  for (auto const &x : sparse_array) {
 	    int diff = update_order - bookkeeping[x.first] - 1;
-	    double sum = sum_pows[(int)diff];
+	    double sum = 0;
+	    if (diff >= 0) sum = sum_pows[(int)diff];
 	    double first_part = model[x.first] * pow(1 - LAMBDA * C * GAMMA, diff);
 	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
 	    model[x.first] = first_part + second_part;
@@ -387,7 +392,8 @@ void initialize_model() {
 void update_coords() {
     for (int i = 0; i < N_DIMENSION; i++) {
 	int diff = N_DIMENSION - bookkeeping[i];
-	double sum = sum_pows[diff];
+	double sum = 0;
+	if (diff >= 0) sum = sum_pows[(int)diff];
 	double first_part = model[i] * pow(1 - LAMBDA * C * GAMMA, diff);
 	double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
 	model[i] = first_part + second_part;
@@ -479,15 +485,18 @@ vector<DataPoint> get_sparse_matrix() {
   map<int, int> node_id_map;
   while (getline(in, s)) {
     stringstream linestream(s);
-    if (s[0] == '#') continue;
+    if (s[0] == '#' || s[0] == '%') continue;
     int n1, n2;
+    double w = 1;
     linestream >> n1 >> n2;
     if (node_id_map.find(n1) == node_id_map.end())
       node_id_map[n1] = node_id_map.size();
     if (node_id_map.find(n2) == node_id_map.end())
       node_id_map[n2] = node_id_map.size();
-    A[node_id_map[n1]].second[node_id_map[n2]] = 1;
-    A[node_id_map[n2]].second[node_id_map[n1]] =1;
+    if (linestream >> w);
+    else w = 1;
+    A[node_id_map[n1]].second[node_id_map[n2]] = w;
+    A[node_id_map[n2]].second[node_id_map[n1]] =w;
   }
   
   initialize_matrix_data(A);
