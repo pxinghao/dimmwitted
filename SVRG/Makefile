@@ -2,40 +2,41 @@ N_EPOCHS=150
 BATCH_SIZE=200
 NTHREAD=8
 SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=0
+START_GAMMA=-1
 
-cyc_matrix_inverse_hog_saga_compile:
+cyc_matrix_inverse_hog_svrg_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_hog \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=1
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSVRG=1 -DSTART_GAMMA=$(START_GAMMA)
 
-cyc_matrix_inverse_hog_saga_run:
+cyc_matrix_inverse_hog_svrg_run:
 	@./matrix_inverse_hog
 
 cyc_matrix_inverse_hog_sgd_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_hog \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=0
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSVRG=0 -DSTART_GAMMA=$(START_GAMMA)
 cyc_matrix_inverse_hog_sgd_run:
 	@./matrix_inverse_hog
 
-cyc_matrix_inverse_cyc_saga_compile:
-	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_cyc_sag \
+cyc_matrix_inverse_cyc_svrg_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_cyc_svrg \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1
-cyc_matrix_inverse_cyc_saga_run:
-	@./matrix_inverse_cyc_sag
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSVRG=1 -DSTART_GAMMA=$(START_GAMMA)
+cyc_matrix_inverse_cyc_svrg_run:
+	@./matrix_inverse_cyc_svrg
 
-cyc_matrix_inverse_cyc_sag2_compile:
-	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_cyc_sag \
+cyc_matrix_inverse_cyc_svrg2_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_cyc_svrg \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1
-cyc_matrix_inverse_cyc_sag2_run:
-	@./matrix_inverse_cyc_sag
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSVRG=1 -DSTART_GAMMA=$(START_GAMMA)
+cyc_matrix_inverse_cyc_svrg2_run:
+	@./matrix_inverse_cyc_svrg
 
 cyc_matrix_inverse_cyc_sgd_compile:
 	g++ -Ofast -fopenmp -std=c++11 cyclades_matrix_inverse.cpp -lnuma   -lpthread -o matrix_inverse_cyc_sgd \
 	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
-	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAG=0
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSVRG=0 -DSTART_GAMMA=$(START_GAMMA)
 cyc_matrix_inverse_cyc_sgd_run:
 	@./matrix_inverse_cyc_sgd
 

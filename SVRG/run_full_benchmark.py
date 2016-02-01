@@ -526,4 +526,4 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
     
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
-draw_time_loss_graph(1, 200, [1000], [8], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 1);
+draw_time_loss_graph(0, 200, [10000], [16], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 1, [1e-3]);
