@@ -26,8 +26,8 @@
 //#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
 //#define N_DIMENSION 48838
 #define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
-//#define N_DIMENSION 5425964
-#define N_DIMENSION 200
+#define N_DIMENSION 5425964
+
 //#define MATRIX_DATA_FILE "youtube-u-growth/out.youtube-u-growth"
 //#define N_DIMENSION 3223589+1
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
@@ -36,7 +36,7 @@
 //#define N_DIMENSION 10000
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 16
 #endif
 
 #define RANGE 10
@@ -47,8 +47,7 @@
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 1000 //nh2010
-//#define BATCH_SIZE 5000
-#define BATCH_SIZE 1
+#define BATCH_SIZE 5000
 #endif
 
 #ifndef HOG
@@ -78,7 +77,7 @@
 #ifndef SET_GAMMA
 //#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
 //#define SET_GAMMA 1e-3 //BEST HOG SVRG
-#define SET_GAMMA 1 //BEST CYC SVRG
+#define SET_GAMMA .01 //BEST CYC SVRG
 #endif
 
 #ifndef SVRG
@@ -514,7 +513,7 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     double x_k_prime[N_DIMENSION], x_k[N_DIMENSION], x_k_prime_prime[N_DIMENSION];
     memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
     memcpy(x_k, random_d, sizeof(double) * N_DIMENSION);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 30; i++) {
       mat_vect_mult(sparse_matrix, x_k, x_k_prime);
       mat_vect_mult(transpose, x_k_prime, x_k);
 
@@ -530,8 +529,9 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     mat_vect_mult(sparse_matrix, x_k, x_k_prime);
     mat_vect_mult(transpose, x_k_prime, x_k_prime_prime);
     for (int i = 0; i < N_DIMENSION; i++) {
-      LAMBDA += x_k_prime_prime[i] * 1.2 * x_k[i];
+      LAMBDA += x_k_prime_prime[i] * 1.1 * x_k[i];
     }
+    //cout << LAMBDA << endl;
 
     //precompute sum of powers
     sum = 0;
@@ -603,7 +603,7 @@ vector<DataPoint> get_sparse_matrix_synthetic() {
 }
 
 void cyc_matrix_inverse() {
-  vector<DataPoint> points = get_sparse_matrix_synthetic();
+  vector<DataPoint> points = get_sparse_matrix();
   initialize_model();
   random_shuffle(points.begin(), points.end());
   vector<DataPoint> points_copy(points);
