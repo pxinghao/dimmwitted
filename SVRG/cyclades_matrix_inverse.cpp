@@ -26,27 +26,29 @@
 //#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
 //#define N_DIMENSION 48838
 #define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
-#define N_DIMENSION 5425964
+//#define N_DIMENSION 5425964
+#define N_DIMENSION 200
 //#define MATRIX_DATA_FILE "youtube-u-growth/out.youtube-u-growth"
 //#define N_DIMENSION 3223589+1
 #define N_DIMENSION_CACHE_ALIGNED (N_DIMENSION/8+1) * 8
-#define NUM_SPARSE_ELEMENTS_IN_ROW 10
+#define NUM_SPARSE_ELEMENTS_IN_ROW 2
 
 //#define N_DIMENSION 10000
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 1
 #endif
 
-#define RANGE 100
+#define RANGE 10
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 1000
 #endif
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 5000
+//#define BATCH_SIZE 5000
+#define BATCH_SIZE 1
 #endif
 
 #ifndef HOG
@@ -76,37 +78,37 @@
 #ifndef SET_GAMMA
 //#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
 //#define SET_GAMMA 1e-3 //BEST HOG SVRG
-#define SET_GAMMA .1 //BEST CYC SVRG
+#define SET_GAMMA 1 //BEST CYC SVRG
 #endif
 
 #ifndef SVRG
 #define SVRG 1
 #endif
 
-long double GAMMA = START_GAMMA < 0 ? SET_GAMMA : START_GAMMA;
-long double GAMMA_REDUCTION = 1;
+double GAMMA = START_GAMMA < 0 ? SET_GAMMA : START_GAMMA;
+double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
 //Problem: minimize datapoints * model - B
 
 int *trees[NTHREAD];
-long double model[N_DIMENSION][8] __attribute__((aligned(64)));
-long double B[N_DIMENSION];
-long double C = 0; //1 / (frobenius norm of matrix)^2
-long double LAMBDA = 0;
-long double num_zeroes_in_column[N_DIMENSION];
+double model[N_DIMENSION][8] __attribute__((aligned(64)));
+double B[N_DIMENSION];
+double C = 0; //1 / (frobenius norm of matrix)^2
+double LAMBDA = 0;
+double num_zeroes_in_column[N_DIMENSION];
 
 //precompute sum of powers of lambda * C
-long double sum_pows[N_DIMENSION];
+double sum_pows[N_DIMENSION+1];
 
-//long double gradient_tilde[N_DIMENSION][N_DIMENSION];
-long double sum_gradient_tilde[N_DIMENSION];
-long double model_tilde[N_DIMENSION] __attribute__((aligned(64)));
+//double gradient_tilde[N_DIMENSION][N_DIMENSION];
+double sum_gradient_tilde[N_DIMENSION];
+double model_tilde[N_DIMENSION] __attribute__((aligned(64)));
 
 int bookkeeping[N_DIMENSION];
 
-long double thread_load_balance[NTHREAD];
+double thread_load_balance[NTHREAD];
 size_t cur_bytes_allocated[NTHREAD];
 int cur_datapoints_used[NTHREAD];
 int core_to_node[NTHREAD];
@@ -114,7 +116,7 @@ int core_to_node[NTHREAD];
 using namespace std;
 
 //row #, sparse_vector of row
-typedef pair<int, map<int, long double> > DataPoint;
+typedef pair<int, map<int, double> > DataPoint;
 
 struct Comp
 {
@@ -130,69 +132,70 @@ void pin_to_core(size_t core) {
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 }
 
-void get_gradient(DataPoint &p, long double *out) {
-    long double ai_t_x = 0;
+void get_gradient(DataPoint &p, double *out) {
+    double ai_t_x = 0;
     for (int i = 0; i < N_DIMENSION; i++) {
-	long double weight = 0;
+	double weight = 0;
 	if (p.second.find(i) != p.second.end()) weight = p.second[i];
 	ai_t_x += weight * model[i][0];
 	out[i] = LAMBDA * C * model[i][0];
     }
     for (int i = 0; i < N_DIMENSION; i++) {
-	long double weight = 0;
+	double weight = 0;
 	if (p.second.find(i) != p.second.end()) weight = p.second[i];
 	out[i] -= ai_t_x * weight + B[i] / N_DIMENSION;
     }
 }
 
-void mat_vect_mult(vector<DataPoint> &sparse_matrix, long double *in, long double *out) {
-  memset(out, 0, sizeof(long double) * N_DIMENSION);
+void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
+  memset(out, 0, sizeof(double) * N_DIMENSION);
   for (int j = 0; j < sparse_matrix.size(); j++) {
-    map<int, long double> sparse_row = sparse_matrix[j].second;
+    map<int, double> sparse_row = sparse_matrix[j].second;
     int row = sparse_matrix[j].first;
+
     for (auto const & x : sparse_row) {
       out[row] += in[x.first] * x.second;
     }
   }
 }
 
-long double compute_loss(vector<DataPoint> &pts) {
+double compute_loss(vector<DataPoint> &pts) {
   /*//Compute gradient loss
-  long double loss = 0;
+  double loss = 0;
   for (int i = 0; i < N_DIMENSION; i++) {
-    long double grad[N_DIMENSION];
+    double grad[N_DIMENSION];
     get_gradient(pts[i], grad);
     for (int i = 0; i < N_DIMENSION; i++)
       loss += grad[i] * grad[i];
   }
   return loss / N_DIMENSION;*/
 
-  long double loss = 0;
-  long double second = 0;
-  long double sum_sqr = 0;
+  double loss = 0;
+  double second = 0;
+  double sum_sqr = 0;
   for (int j = 0; j < N_DIMENSION; j++) {
     second += model[j][0] * B[j];
     sum_sqr += model[j][0] * model[j][0];
   }
   for (int i = 0; i < pts.size(); i++) {
-    long double ai_t_x = 0;
-    map<int, long double> sparse_row = pts[i].second;
-    long double first = sum_sqr * C * LAMBDA;
+    double ai_t_x = 0;
+    map<int, double> sparse_row = pts[i].second;
+    double first = sum_sqr * C * LAMBDA;
     for (auto const & element : sparse_row) {
       ai_t_x += model[element.first][0] * element.second;      
     }
     first -= ai_t_x * ai_t_x;
-    loss += .5 * first - 1/(long double)N_DIMENSION * second;
+    loss += .5 * first - 1/(double)N_DIMENSION * second;
   }
-  
+  return loss;
   /*cout << "ACTUAL LOSS: " << loss << endl;
   loss = 0;
 
-  long double Ax[N_DIMENSION];
-  long double At_Ax[N_DIMENSION];
-  memset(Ax, 0, sizeof(long double) * N_DIMENSION);
-  memset(At_Ax, 0, sizeof(long double) * N_DIMENSION);
-  long double model_copy[N_DIMENSION];
+  double Ax[N_DIMENSION];
+  double At_Ax[N_DIMENSION];
+  memset(Ax, 0, sizeof(double) * N_DIMENSION);
+  memset(At_Ax, 0, sizeof(double) * N_DIMENSION);
+  double model_copy[N_DIMENSION];
   for (int i = 0; i < N_DIMENSION; i++) model_copy[i] = model[i][0];
   mat_vect_mult(pts, model_copy, Ax);
   //WORKS ONLY FOR SYMMETRIC MATRICES
@@ -203,22 +206,22 @@ long double compute_loss(vector<DataPoint> &pts) {
   }
   
   
-  //Get rid of negative*/
-  return loss + 1;
+  //Get rid of negative
+  return loss;*/
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
 
   //Copy model
-  memcpy(model_tilde, model, sizeof(long double) * N_DIMENSION);
-
+  //memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
+  for (int i = 0; i < N_DIMENSION; i++) model_tilde[i] = model[i][0];
   //Reset sum of gradients
   for (int j = 0; j < N_DIMENSION; j++) {
     sum_gradient_tilde[j] = 0;
   }
   
   //Calculate sum of gradient tildes
-  /*long double gradient_tilde[N_DIMENSION];
+  /*double gradient_tilde[N_DIMENSION];
   for (int i = 0; i < N_DIMENSION; i++) {
     get_gradient(pts[i], gradient_tilde);
     for (int j = 0; j < N_DIMENSION; j++) {
@@ -228,8 +231,8 @@ void calculate_gradient_tilde(vector<DataPoint> &pts) {
 
   //Calculate sum of gradient tildes
   for (int i = 0; i < pts.size(); i++) {
-    long double ai_t_x = 0;
-    map<int, long double> sparse_row = pts[i].second;
+    double ai_t_x = 0;
+    map<int, double> sparse_row = pts[i].second;
     for (auto const & x : sparse_row) {
       ai_t_x += model_tilde[x.first] * x.second;
     }
@@ -271,11 +274,10 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	int indx = batch_index_start[batch]+i;
 	DataPoint p = access_pattern[indx];
 	int row = p.first;
-	map<int, long double> sparse_array = p.second;
+	map<int, double> sparse_array = p.second;
 	int update_order = order[indx];
-	
 	if (!SVRG) {
-	  long double out[N_DIMENSION];
+	  double out[N_DIMENSION];
 	  get_gradient(p, out);
 	  for (int i = 0; i < N_DIMENSION; i++) {
 	    model[i][0] -= GAMMA * out[i];
@@ -284,24 +286,26 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	else {
 	  //catch up
 	  for (auto const &x : sparse_array) {
+	    
 	    int diff = update_order - bookkeeping[x.first] - 1;
-	    long double sum = 0;
+	    double sum = 0;
 	    if (diff >= 0) sum = sum_pows[(int)diff];
-	    long double first_part = model[x.first][0] * pow(1 - LAMBDA * C * GAMMA, diff);
-	    long double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(long double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
+	    double first_part = model[x.first][0] * pow(1 - LAMBDA * C * GAMMA, diff);
+	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
 	    model[x.first][0] = first_part + second_part;
+	    //cout << "MOD: " << model[x.first][0] << endl;
 	  }
 	  
 	  //Compute gradient
-	  long double ai_t_x = 0, ai_t_x_tilde = 0;
+	  double ai_t_x = 0, ai_t_x_tilde = 0;
 	  for (auto const &x : sparse_array) {
 	    ai_t_x += model[x.first][0] * x.second;
 	    ai_t_x_tilde += model_tilde[x.first] * x.second;
 	  }
-	  long double ai_ai_t_x = 0;
+
 	  for (auto const &x : sparse_array) {
-	    long double gradient = C * LAMBDA * model[x.first][0] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
-	    long double gradient_tilde_val = C * LAMBDA * model_tilde[x.first] - ai_t_x_tilde - B[x.first] / N_DIMENSION;  
+	    double gradient = C * LAMBDA * model[x.first][0] - ai_t_x * x.second - B[x.first] / N_DIMENSION;
+	    double gradient_tilde_val = C * LAMBDA * model_tilde[x.first] - ai_t_x_tilde * x.second - B[x.first] / N_DIMENSION;  
 	    model[x.first][0] -= GAMMA * (gradient - gradient_tilde_val + sum_gradient_tilde[x.first] / N_DIMENSION);
 	    bookkeeping[x.first] = update_order;
 	  }
@@ -325,7 +329,7 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   make_heap(balances.begin(), balances.end(), Comp());
 
   //Count total size needed for each access pattern
-  long double max_cc_size = 0, avg_cc_size = 0;
+  double max_cc_size = 0, avg_cc_size = 0;
   for (map<int, vector<int> >::iterator it = ccs.begin(); it != ccs.end(); it++, count++) {
     pair<int, int> best_balance = balances.front();
     int chosen_thread = best_balance.first;
@@ -340,10 +344,10 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
     best_balance.second += num_coords;
 
     balances.push_back(best_balance); push_heap(balances.begin(), balances.end(), Comp());
-    max_cc_size = max(max_cc_size, (long double) cc.size());
+    max_cc_size = max(max_cc_size, (double) cc.size());
     avg_cc_size += cc.size();
   }
-  avg_cc_size /= (long double)ccs.size();
+  avg_cc_size /= (double)ccs.size();
 
   for (int i = 0; i < balances.size(); i++) {
     //cout << balances[i].second << " ";
@@ -402,10 +406,10 @@ void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, i
 
   for (int i = start; i < end; i++) {
     DataPoint p = points[i];
-    map<int, long double> row = p.second;
+    map<int, double> row = p.second;
     int src = i-start;
     int src_group = union_find(src, tree);
-    for (map<int, long double>::iterator it = row.begin(); it != row.end(); it++) {
+    for (map<int, double>::iterator it = row.begin(); it != row.end(); it++) {
       int element = union_find(it->first + end-start, tree);
       tree[element] = src_group;
     }
@@ -429,10 +433,10 @@ void initialize_model() {
 void update_coords() {
     for (int i = 0; i < N_DIMENSION; i++) {
 	int diff = N_DIMENSION - bookkeeping[i];
-	long double sum = 0;
+	double sum = 0;
 	if (diff >= 0) sum = sum_pows[(int)diff];
-	long double first_part = model[i][0] * pow(1 - LAMBDA * C * GAMMA, diff);
-	long double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(long double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
+	double first_part = model[i][0] * pow(1 - LAMBDA * C * GAMMA, diff);
+	double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
 	model[i][0] = first_part + second_part;
     }
 }
@@ -446,15 +450,27 @@ void clear_bookkeeping() {
   }
 }
 
+vector<DataPoint> get_transpose(vector<DataPoint> &mat) {
+  vector<DataPoint> t(N_DIMENSION);
+  for (int i = 0; i < N_DIMENSION; i++) t[i].first = i;
+  for (int i = 0; i < mat.size(); i++) {
+    map<int, double> row = mat[i].second;
+    for (auto const &x : row) {
+      t[x.first].second[mat[i].first] = x.second;
+    }
+  }
+  return t;
+}
+
 void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     //Normalize the rows to be 1
     for (int i = 0; i < N_DIMENSION; i++) {
-	map<int, long double> &row = sparse_matrix[i].second;
-	long double sum = 0;
+	map<int, double> &row = sparse_matrix[i].second;
+	double sum = 0;
 	for (auto const & x : row) {
 	    sum += x.second * x.second;
 	}
-	long double norm_factor = sqrt(sum);
+	double norm_factor = sqrt(sum);
 	if (norm_factor != 0) {
 	  for (auto const & x : row) {
 	    row[x.first] /= norm_factor;
@@ -463,63 +479,66 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     }
 
     //Calculate frobenius norm of matrix
-    long double sum = 0;
+    double sum = 0;
     for (int i = 0; i < N_DIMENSION; i++) {
-      map<int, long double> row = sparse_matrix[i].second;
+      map<int, double> row = sparse_matrix[i].second;
       for (auto const & x : row) {
 	sum += x.second * x.second;
       }
     }
-    C = 1 / sqrt(sum);
+    C = 1/sum;
 
     //Initialize B to be random
-    long double random_d[N_DIMENSION];
-    long double extra_b[N_DIMENSION];
-    long double sum_b = 0;
+    double random_d[N_DIMENSION];
+    double extra_b[N_DIMENSION];
+    double sum_b = 0;
     for (int i = 0; i < N_DIMENSION; i++) {
       random_d[i] = rand() % RANGE;
     }
     //compute AA*random_vector
-    memset(B, 0, sizeof(long double)*N_DIMENSION);
+    memset(B, 0, sizeof(double)*N_DIMENSION);
+
     mat_vect_mult(sparse_matrix, random_d, B);
     mat_vect_mult(sparse_matrix, B, extra_b);
     for (int i = 0; i < N_DIMENSION; i++) {
       sum_b += extra_b[i]*extra_b[i];
     }
-    long double norm_b = sqrt(sum_b);
+    double norm_b = sqrt(sum_b);
     for (int i = 0; i < N_DIMENSION; i++) {
       B[i] = extra_b[i]/norm_b;
     }
     
     //Compute Lambda
-    long double x_k_prime[N_DIMENSION], x_k[N_DIMENSION];
-    memset(x_k_prime, 0, sizeof(long double) * N_DIMENSION);
-    memcpy(x_k, random_d, sizeof(long double) * N_DIMENSION);
+    vector<DataPoint> transpose = get_transpose(sparse_matrix);
+
+    double x_k_prime[N_DIMENSION], x_k[N_DIMENSION], x_k_prime_prime[N_DIMENSION];
+    memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
+    memcpy(x_k, random_d, sizeof(double) * N_DIMENSION);
     for (int i = 0; i < 3; i++) {
       mat_vect_mult(sparse_matrix, x_k, x_k_prime);
+      mat_vect_mult(transpose, x_k_prime, x_k);
 
-      long double x_3_norm = 0;
+      double x_3_norm = 0;
       for (int i = 0; i < N_DIMENSION; i++) {
-	x_3_norm += x_k_prime[i] * x_k_prime[i];
+	x_3_norm += x_k[i] * x_k[i];
       }
-      x_3_norm = sqrt(x_3_norm);
       for (int i = 0; i < N_DIMENSION; i++) {
-	x_k_prime[i] /= x_3_norm;
+	x_k[i] /= sqrt(x_3_norm);
       }
-      
-      memcpy(x_k, x_k_prime, sizeof(long double) * N_DIMENSION);
-      memset(x_k_prime, 0, sizeof(long double) * N_DIMENSION);
+      memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);      
     }
     mat_vect_mult(sparse_matrix, x_k, x_k_prime);
+    mat_vect_mult(transpose, x_k_prime, x_k_prime_prime);
     for (int i = 0; i < N_DIMENSION; i++) {
-      LAMBDA += x_k_prime[i] * 1.1 * x_k[i];
+      LAMBDA += x_k_prime_prime[i] * 1.2 * x_k[i];
     }
-    
+
     //precompute sum of powers
     sum = 0;
+    sum_pows[0] = 0;
     for (int j = 0; j < N_DIMENSION; j++) {
       sum += pow(1 - LAMBDA * GAMMA * C,  j);
-      sum_pows[j] = sum;
+      sum_pows[j+1] = sum;
     }   
 }
 
@@ -539,7 +558,7 @@ vector<DataPoint> get_sparse_matrix() {
     stringstream linestream(s);
     if (s[0] == '#' || s[0] == '%') continue;
     int n1, n2;
-    long double w = 1;
+    double w = 1;
     linestream >> n1 >> n2;
     if (node_id_map.find(n1) == node_id_map.end())
       node_id_map[n1] = node_id_map.size();
@@ -558,29 +577,29 @@ vector<DataPoint> get_sparse_matrix() {
 }
 
 vector<DataPoint> get_sparse_matrix_synthetic() {
-    vector<DataPoint> sparse_matrix;
+  vector<DataPoint> sparse_matrix;
 
-    //Initialize # of zeroes in columns
-    for (int i = 0; i < N_DIMENSION; i++) {
-      num_zeroes_in_column[i] = N_DIMENSION;
-    }
+  //Initialize # of zeroes in columns
+  for (int i = 0; i < N_DIMENSION; i++) {
+    num_zeroes_in_column[i] = N_DIMENSION;
+  }
+  
+  //Randomize the sparse matrix
+  for (int i = 0; i < N_DIMENSION; i++) {
+    DataPoint p = DataPoint(i, map<int, double>());
+    for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW + 1; j++) {
+      int column = rand() % N_DIMENSION;
+      if (p.second.find(column) == p.second.end()) {
+	p.second[column] = rand() % RANGE;
+	num_zeroes_in_column[column]--;
+      }
+    } 
+    sparse_matrix.push_back(p);
+  }
+  
+  initialize_matrix_data(sparse_matrix);
 
-    //Randomize the sparse matrix
-    for (int i = 0; i < N_DIMENSION; i++) {
-      DataPoint p = DataPoint(i, map<int, long double>());
-      for (int j = 0; j < rand() % NUM_SPARSE_ELEMENTS_IN_ROW; j++) {
-	int column = rand() % N_DIMENSION;
-	if (p.second.find(column) == p.second.end()) {
-	  p.second[column] = rand() % RANGE;
-	  num_zeroes_in_column[column]--;
-	}
-      } 
-      sparse_matrix.push_back(p);
-    }
-
-    initialize_matrix_data(sparse_matrix);
-
-    return sparse_matrix;
+  return sparse_matrix;
 }
 
 void cyc_matrix_inverse() {
@@ -591,7 +610,7 @@ void cyc_matrix_inverse() {
   
   Timer overall;
 
-  int n_batches = (int)ceil((points.size() / (long double)BATCH_SIZE));
+  int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
   vector<vector<DataPoint> > access_pattern(NTHREAD);
   vector<vector<int > > access_length(NTHREAD);
   vector<vector<int > > batch_index_start(NTHREAD);
@@ -620,10 +639,10 @@ void cyc_matrix_inverse() {
   }
 
   /*for (int i = 0; i < NTHREAD; i++) {
-    prev_gradients[i] = (long double **)malloc(sizeof(long double *) * thread_load_balance[i]);
+    prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
       int size = access_pattern[i][j].second.size();
-      prev_gradients[i][j] = (long double *)malloc(sizeof(long double) * size * N_CATEGORIES);
+      prev_gradients[i][j] = (double *)malloc(sizeof(double) * size * N_CATEGORIES);
       for (int k = 0; k < size * N_CATEGORIES; k++) {
 	prev_gradients[i][j][k] = 0;
       }
@@ -633,6 +652,7 @@ void cyc_matrix_inverse() {
   //Perform cyclades
   float copy_time = 0;
   Timer gradient_time;
+
   for (int i = 0; i < N_EPOCHS; i++) {
     calculate_gradient_tilde(points);
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
@@ -659,30 +679,6 @@ void cyc_matrix_inverse() {
     GAMMA *= GAMMA_REDUCTION;
     
     clear_bookkeeping();
-    
-    //Shuffle
-    //for (int ii = 0; ii < NTHREAD; ii++) {
-    //random_shuffle(order[ii].begin(), order[ii].end());
-    //}
-    
-    /*for (int ii = 0; ii < NTHREAD; ii++) {
-      thread_load_balance[ii] = 0;
-      cur_datapoints_used[ii] = 0;
-    }
-    
-    random_shuffle(points_copy.begin(), points_copy.end());
-    
-    //#pragma omp parallel for
-    for (int ii = 0; ii < n_batches; ii++) {
-      int start = ii * BATCH_SIZE;
-      int end = min((ii+1)*BATCH_SIZE, (int)points_copy.size());
-      CCs[ii].clear();
-      compute_CC_thread(CCs[ii], points_copy, start, end, omp_get_thread_num());
-    }
-    
-    for (int ii = 0; ii < n_batches; ii++) {
-      distribute_ccs(CCs[ii], access_pattern, access_length, batch_index_start, ii, points_copy, order);
-      }*/
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -755,11 +751,6 @@ void hog_matrix_inverse() {
     }
     GAMMA *= GAMMA_REDUCTION;
     clear_bookkeeping();
-
-    
-    /*for (int j = 0; j < NTHREAD; j++) {
-      random_shuffle(access_pattern[j].begin(), access_pattern[j].end());
-      }*/
   }
   if (!SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
     cout << overall.elapsed() << endl;
@@ -775,11 +766,11 @@ int main(void) {
   std::cout << std::setprecision(10);
   pin_to_core(0);
 
-  /*sum_gradients = (long double **)malloc(sizeof(long double *) * N_DIMENSION);
-  //model = (long double **)malloc(sizeof(long double *) * N_DIMENSION);
+  /*sum_gradients = (double **)malloc(sizeof(double *) * N_DIMENSION);
+  //model = (double **)malloc(sizeof(double *) * N_DIMENSION);
   for (int i = 0; i < N_DIMENSION; i++) {
-    //model[i] = (long double *)malloc(sizeof(long double) * N_CATEGORIES_CACHE_ALIGNED);
-    sum_gradients[i] = (long double *)malloc(sizeof(long double) * N_CATEGORIES_CACHE_ALIGNED);
+    //model[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
+    sum_gradients[i] = (double *)malloc(sizeof(double) * N_CATEGORIES_CACHE_ALIGNED);
   }
 
   for (int i = 0; i < N_DIMENSION; i++) {
@@ -823,7 +814,7 @@ int main(void) {
   //for (int i = 0; i < N_DIMENSION; i++) {
     //cout << model[i][0] << " ";
   //}
-  cout << endl;
+  //cout << endl;
   //for (int i = 0; i < NTHREAD; i++)
   //cout << thread_load_balance[i] << endl;
 }
