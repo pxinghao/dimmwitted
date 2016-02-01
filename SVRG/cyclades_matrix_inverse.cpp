@@ -38,10 +38,10 @@
 #define NTHREAD 16
 #endif
 
-#define RANGE 10
+#define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 20
 #endif
 
 #ifndef BATCH_SIZE
@@ -76,7 +76,7 @@
 #ifndef SET_GAMMA
 //#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
 //#define SET_GAMMA 1e-3 //BEST HOG SVRG
-#define SET_GAMMA 1e-3 //BEST CYC SVRG
+#define SET_GAMMA .1 //BEST CYC SVRG
 #endif
 
 #ifndef SVRG
@@ -84,7 +84,7 @@
 #endif
 
 long double GAMMA = START_GAMMA < 0 ? SET_GAMMA : START_GAMMA;
-long double GAMMA_REDUCTION = .9;
+long double GAMMA_REDUCTION = 1;
 
 int volatile thread_batch_on[NTHREAD];
 
@@ -146,13 +146,14 @@ void get_gradient(DataPoint &p, long double *out) {
 }
 
 void mat_vect_mult(vector<DataPoint> &sparse_matrix, long double *in, long double *out) {
-    for (int j = 0; j < sparse_matrix.size(); j++) {
-	map<int, long double> sparse_row = sparse_matrix[j].second;
-	int row = sparse_matrix[j].first;
-	for (auto const & x : sparse_row) {
-	    out[row] += in[x.first] * x.second;
-	}
+  memset(out, 0, sizeof(long double) * N_DIMENSION);
+  for (int j = 0; j < sparse_matrix.size(); j++) {
+    map<int, long double> sparse_row = sparse_matrix[j].second;
+    int row = sparse_matrix[j].first;
+    for (auto const & x : sparse_row) {
+      out[row] += in[x.first] * x.second;
     }
+  }
 }
 
 long double compute_loss(vector<DataPoint> &pts) {
@@ -469,44 +470,51 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
 	sum += x.second * x.second;
       }
     }
-    C = 1 / sum;
+    C = 1 / sqrt(sum);
 
     //Initialize B to be random
+    long double random_d[N_DIMENSION];
+    long double extra_b[N_DIMENSION];
     long double sum_b = 0;
-    //ifstream B_fin("out1");
     for (int i = 0; i < N_DIMENSION; i++) {
-      B[i] = rand() % RANGE;
-      //B_fin >> B[i];
-      sum_b += B[i] * B[i];
+      random_d[i] = rand() % RANGE;
     }
-    sum_b = sqrt(sum_b);
+    //compute AA*random_vector
+    memset(B, 0, sizeof(long double)*N_DIMENSION);
+    mat_vect_mult(sparse_matrix, random_d, B);
+    mat_vect_mult(sparse_matrix, B, extra_b);
     for (int i = 0; i < N_DIMENSION; i++) {
-      B[i] /= sum_b;
+      sum_b += extra_b[i]*extra_b[i];
+    }
+    long double norm_b = sqrt(sum_b);
+    for (int i = 0; i < N_DIMENSION; i++) {
+      B[i] = extra_b[i]/norm_b;
     }
     
     //Compute Lambda
     long double x_k_prime[N_DIMENSION], x_k[N_DIMENSION];
     memset(x_k_prime, 0, sizeof(long double) * N_DIMENSION);
-    memcpy(x_k, B, sizeof(long double) * N_DIMENSION);
+    memcpy(x_k, random_d, sizeof(long double) * N_DIMENSION);
     for (int i = 0; i < 3; i++) {
       mat_vect_mult(sparse_matrix, x_k, x_k_prime);
+
+      long double x_3_norm = 0;
+      for (int i = 0; i < N_DIMENSION; i++) {
+	x_3_norm += x_k_prime[i] * x_k_prime[i];
+      }
+      x_3_norm = sqrt(x_3_norm);
+      for (int i = 0; i < N_DIMENSION; i++) {
+	x_k_prime[i] /= x_3_norm;
+      }
+      
       memcpy(x_k, x_k_prime, sizeof(long double) * N_DIMENSION);
       memset(x_k_prime, 0, sizeof(long double) * N_DIMENSION);
-    }
-    long double x_3_norm = 0;
-    for (int i = 0; i < N_DIMENSION; i++) {
-      x_3_norm += x_k[i] * x_k[i];
-    }
-    x_3_norm = sqrt(x_3_norm);
-    for (int i = 0; i < N_DIMENSION; i++) {
-      x_k[i] /= x_3_norm;
     }
     mat_vect_mult(sparse_matrix, x_k, x_k_prime);
     for (int i = 0; i < N_DIMENSION; i++) {
       LAMBDA += x_k_prime[i] * 1.1 * x_k[i];
     }
-    LAMBDA += 2000;
-
+    
     //precompute sum of powers
     sum = 0;
     for (int j = 0; j < N_DIMENSION; j++) {
@@ -576,7 +584,7 @@ vector<DataPoint> get_sparse_matrix_synthetic() {
 }
 
 void cyc_matrix_inverse() {
-  vector<DataPoint> points = get_sparse_matrix();
+  vector<DataPoint> points = get_sparse_matrix_synthetic();
   initialize_model();
   random_shuffle(points.begin(), points.end());
   vector<DataPoint> points_copy(points);
