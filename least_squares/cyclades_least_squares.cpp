@@ -23,10 +23,12 @@
 //#define N_DIMENSION 8193
 //#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
 //#define N_DIMENSION 2049
-#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
-#define N_DIMENSION 48838
-//#define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
-//#define N_DIMENSION 5425964
+//#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
+//#define N_DIMENSION 48838
+#define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
+#define N_DIMENSION 5425964
+//#define MATRIX_DATA_FILE "ego-gplus/out.ego-gplus"
+//#define N_DIMENSION 23629
 
 //#define MATRIX_DATA_FILE "youtube-u-growth/out.youtube-u-growth"
 //#define N_DIMENSION 3223589+1
@@ -36,13 +38,13 @@
 //#define N_DIMENSION 10000
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 8
 #endif
 
-#define RANGE 1000
+#define RANGE 2
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 20
 #endif
 
 #ifndef BATCH_SIZE
@@ -79,12 +81,12 @@
 #endif
 
 #ifndef SET_GAMMA
-#define SET_GAMMA 1e-15 //BEST SAGA CYC
-//#define SET_GAMMA 1e-17 //BEST SAGA HOG
-//#define SET_GAMMA 5e-2 //BEST SAGA HOG
-//#define SET_GAMMA 1e-2 //BEST SGD CYC
+//NH2010
+//#define SET_GAMMA 3e-14 //BEST SAGA CYC NH2010
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
 
-//#define SET_GAMMA .1 //BEST SGD CYC
+#define SET_GAMMA 2e-5 //HOG CYC DBLP
+//#define SET_GAMM1A 3e-4 //CYC DBLP
 #endif
 
 #ifndef SAGA
@@ -103,7 +105,7 @@ int volatile thread_batch_on[NTHREAD];
 int *trees[NTHREAD];
 map<int, double> prev_gradients[N_DIMENSION];
 double sum_gradients[N_DIMENSION];
-double model[N_DIMENSION][0] __attribute__((aligned(64)));
+double model[N_DIMENSION][1] __attribute__((aligned(64)));
 double B[N_DIMENSION];
 
 int bookkeeping[N_DIMENSION];
@@ -148,17 +150,15 @@ void mat_vect_mult(vector<DataPoint> &sparse_matrix, double *in, double *out) {
 double compute_loss(vector<DataPoint> &pts) {
   // ||Ax-b||
   double loss = 0;
-  double n_points = 0;
   for (int i = 0; i < pts.size(); i++) {
     map<int, double> row = pts[i].second;
     double est = 0;
     for (auto const &x: row) {
-      n_points++;
       est += x.second * model[x.first][0];
     }
     loss += (est - B[pts[i].first]) * (est - B[pts[i].first]);
   }
-  return loss / n_points;
+  return loss / (double)N_DIMENSION;
 }
 
 
@@ -281,8 +281,8 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<vector<DataPoint> > &acc
   for (int i = 0; i < balances.size(); i++) {
     //cout << balances[i].second << " ";
   }
-  //cout << endl;
-
+  ///cout << endl;
+  
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -469,7 +469,7 @@ void cyc_least_squares() {
 
   //CC Parallel
   map<int, vector<int> > CCs[n_batches];
-  #pragma omp parallel for
+#pragma omp parallel for
   for (int i = 0; i < n_batches; i++) {
     int start = i * BATCH_SIZE;
     int end = min((i+1)*BATCH_SIZE, (int)points.size());
