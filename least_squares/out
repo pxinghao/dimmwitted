@@ -1,0 +1,2 @@
+rm -rf least_squares_cyc
+g++  -Ofast -fopenmp -std=c++11  cyclades_least_squares.cpp -lnuma   -lpthread -DCYC=1 -o least_squares_cyc

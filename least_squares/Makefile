@@ -1,0 +1,79 @@
+N_EPOCHS=150
+BATCH_SIZE=200
+NTHREAD=8
+SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=0
+START_GAMMA=-1
+
+cyc_least_squares_hog_saga_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_hog \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=1 -DSTART_GAMMA=$(START_GAMMA) -DCRIMP=0
+
+cyc_least_squares_hog_saga_run:
+	@./least_squares_hog
+
+cyc_least_squares_hog_saga_crimp_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_hog \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=1 -DSTART_GAMMA=$(START_GAMMA) -DCRIMP=1
+
+cyc_least_squares_hog_saga_crimp_run:
+	@./least_squares_hog
+
+cyc_least_squares_hog_saga2_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_hog \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=1 -DSTART_GAMMA=$(START_GAMMA)
+
+cyc_least_squares_hog_saga2_run:
+	@./least_squares_hog
+
+
+cyc_least_squares_hog_sgd_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_hog \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=1 -DCYC=0 -DSAGA=0 -DSTART_GAMMA=$(START_GAMMA)
+cyc_least_squares_hog_sgd_run:
+	@./least_squares_hog
+
+cyc_least_squares_cyc_saga_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_cyc_saga \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1 -DSTART_GAMMA=$(START_GAMMA)
+cyc_least_squares_cyc_saga_run:
+	@./least_squares_cyc_saga
+
+cyc_least_squares_cyc_saga2_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_cyc_saga \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=1 -DSTART_GAMMA=$(START_GAMMA)
+cyc_least_squares_cyc_saga2_run:
+	@./least_squares_cyc_saga
+
+cyc_least_squares_cyc_sgd_compile:
+	g++ -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -o least_squares_cyc_sgd \
+	-DN_EPOCHS=$(N_EPOCHS) -DBATCH_SIZE=$(BATCH_SIZE) -DNTHREAD=$(NTHREAD) -DK=$(K) \
+	-DSHOULD_SYNC=$(SHOULD_SYNC) -DSHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=$(SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) -DHOG=0 -DCYC=1 -DSAGA=0 -DSTART_GAMMA=$(START_GAMMA)
+cyc_least_squares_cyc_sgd_run:
+	@./least_squares_cyc_sgd
+
+cyc_least_squares_hog:
+	rm -rf least_squares_hog
+	g++   -Ofast -fopenmp -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread  -DHOG=1 -o least_squares_hog
+	./least_squares_hog
+cyc_least_squares_cyc:
+	rm -rf least_squares_cyc
+	g++  -Ofast -fopenmp -std=c++11  cyclades_least_squares.cpp -lnuma   -lpthread -DCYC=1 -o least_squares_cyc
+	./least_squares_cyc
+
+cyc_least_squares_cyc_batch_tune:
+	@for number in 1000 1500 2000 2500 3000 3200 3400 3600 3800 4000 4200 4400 4600 4800 5000 5200 5400 5600 5800 6000 6200 6400 6600 6800 7000 7200 7400 7600 7800 8000 8200 8400 8600 8800 9000 9200 9400 9600 9800; do\
+		echo Batch Size = $$number ; \
+		g++ -fopenmp -Ofast -std=c++11 cyclades_least_squares.cpp -lnuma   -lpthread -DCYC=1 -DBATCH_SIZE=$$number -o tune_batch; \
+		./tune_batch; \
+	done
+
+cyc_least_squares_serial:
+	rm -rf least_squares_cyc_serial
+	g++ -Ofast -fopenmp -std=c++11  cyclades_least_squares_serial.cpp -lnuma   -lpthread -DCYC=1 -o least_squares_cyc_serial
+	./least_squares_cyc_serial
