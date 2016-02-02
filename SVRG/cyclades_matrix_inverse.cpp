@@ -39,15 +39,15 @@
 #define NTHREAD 16
 #endif
 
-#define RANGE 10
+#define RANGE 2
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 1000
+#define N_EPOCHS 5
 #endif
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 5000
+#define BATCH_SIZE 10000
 #endif
 
 #ifndef HOG
@@ -76,8 +76,15 @@
 
 #ifndef SET_GAMMA
 //#define START_GAMMA 4e-6 //HOG DIVERGE SVRG
-//#define SET_GAMMA 1e-3 //BEST HOG SVRG
-#define SET_GAMMA .01 //BEST CYC SVRG
+//#define SET_GAMMA 1e-7 //BEST HOG SVRG
+//#define SET_GAMMA .01 //BEST CYC SVRG
+
+//nh2010 GAMMAS
+//#define START_GAMMA 2e-5 //HOG DIVERGE SVRG
+//#define SET_GAMMA 1e-5 //BEST HOG SVRG
+//#define SET_GAMMA .1 //BEST CYC SVRG
+#define SET_GAMMA .2 //BEST CYC SVRG
+
 #endif
 
 #ifndef SVRG
@@ -186,7 +193,7 @@ double compute_loss(vector<DataPoint> &pts) {
     first -= ai_t_x * ai_t_x;
     loss += .5 * first - 1/(double)N_DIMENSION * second;
   }
-  return loss;
+  return loss + 2; 
   /*cout << "ACTUAL LOSS: " << loss << endl;
   loss = 0;
 
@@ -284,15 +291,15 @@ void do_cyclades_gradient_descent_with_points(DataPoint *access_pattern, vector<
 	}
 	else {
 	  //catch up
-	  for (auto const &x : sparse_array) {
-	    
+	  for (auto const &x : sparse_array) {	    
 	    int diff = update_order - bookkeeping[x.first] - 1;
+	    //crimp
+	    if (diff < 0) diff = 0;
 	    double sum = 0;
 	    if (diff >= 0) sum = sum_pows[(int)diff];
 	    double first_part = model[x.first][0] * pow(1 - LAMBDA * C * GAMMA, diff);
 	    double second_part = GAMMA * (LAMBDA*C*model_tilde[x.first] - 1/(double)N_DIMENSION*sum_gradient_tilde[x.first]) * sum;
 	    model[x.first][0] = first_part + second_part;
-	    //cout << "MOD: " << model[x.first][0] << endl;
 	  }
 	  
 	  //Compute gradient
@@ -423,9 +430,18 @@ void initialize_model() {
 
     //Initialize model
     for (int j = 0; j < N_DIMENSION; j++) {
-	model[j][0] = B[j];
-	bookkeeping[j] = 0;
-	sum_gradient_tilde[j] = 0;
+      //model[j][0] = B[j];
+      model[j][0] = rand() % RANGE;
+      bookkeeping[j] = 0;
+      sum_gradient_tilde[j] = 0;
+    }
+    
+    double sum = 0;
+    for (int j = 0; j < N_DIMENSION; j++) {
+      sum += model[j][0];
+    }
+    for (int j = 0; j < N_DIMENSION; j++) {
+      //model[j][0] /= sqrt(sum);
     }
 }
 
@@ -433,6 +449,8 @@ void update_coords() {
     for (int i = 0; i < N_DIMENSION; i++) {
 	int diff = N_DIMENSION - bookkeeping[i];
 	double sum = 0;
+	//crimp
+	if (diff < 0) diff = 0;
 	if (diff >= 0) sum = sum_pows[(int)diff];
 	double first_part = model[i][0] * pow(1 - LAMBDA * C * GAMMA, diff);
 	double second_part = GAMMA * (LAMBDA*C*model_tilde[i] - 1/(double)N_DIMENSION*sum_gradient_tilde[i]) * sum;
@@ -512,7 +530,9 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
 
     double x_k_prime[N_DIMENSION], x_k[N_DIMENSION], x_k_prime_prime[N_DIMENSION];
     memset(x_k_prime, 0, sizeof(double) * N_DIMENSION);
-    memcpy(x_k, random_d, sizeof(double) * N_DIMENSION);
+    for (int i = 0; i < N_DIMENSION; i++) {
+      x_k[i] = rand() % RANGE;
+    }
     for (int i = 0; i < 30; i++) {
       mat_vect_mult(sparse_matrix, x_k, x_k_prime);
       mat_vect_mult(transpose, x_k_prime, x_k);
