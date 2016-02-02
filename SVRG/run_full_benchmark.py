@@ -142,7 +142,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     else:
                         plt.plot(times, losses, label=name)
             plt.yscale('log')
-            #plt.xscale('log')
+            plt.xscale('log')
             plt.legend(loc="upper right", fontsize=8)
             plt.savefig(title + ".png")
             plt.clf()
@@ -169,7 +169,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     else:
                         plt.plot(times, losses, label=name)
             plt.yscale('log')
-            #plt.xscale('log')
+            plt.xscale('log')
             plt.legend(loc="upper right", fontsize=8)
             plt.savefig(title + ".png")
             plt.clf()
@@ -196,7 +196,7 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
                     else:
                         plt.plot(epochs, losses, label=name)
             plt.yscale('log')
-            #plt.xscale('log')
+            plt.xscale('log')
             plt.legend(loc="upper right", fontsize=8)
             plt.savefig(title + ".png")
             plt.clf()
@@ -526,4 +526,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
     
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
-draw_time_loss_graph(0, 200, [10000], [16], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 1, [1e-3]);
+# NH2010
+#draw_time_loss_graph(0, 500, [1000], [16], [1], ["cyc_matrix_inverse_cyc_svrg2", "cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg", "cyc_matrix_inverse_hog_svrg2"], 1, [1e-5, .1, 1e-5, 2e-5]);
+draw_time_loss_graph(0, 10, [1000], [16], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 1, [.1, .1]);
