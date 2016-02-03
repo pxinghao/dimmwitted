@@ -527,5 +527,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 #draw_time_loss_graph(1, 500, [4250], [8], [30], [1], ["cyc_word_embeddings_cyc_sgd", "cyc_word_embeddings_cyc_sag"], [5e-4, 9e-5])
 
 # NH2010
-#draw_time_loss_graph(0, 500, [1000], [16], [1], ["cyc_matrix_inverse_cyc_svrg2", "cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg", "cyc_matrix_inverse_hog_svrg2"], 1, [1e-5, .1, 1e-5, 2e-5]);
-draw_time_loss_graph(0, 10, [1000], [16], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 1, [.1, .1]);
+draw_time_loss_graph(0, 500, [1000], [1, 4, 8, 16, 32], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 3, [.2, .2]);
+# DBLP
+draw_time_loss_graph(0, 50, [10000], [1, 4, 8, 16, 32], [1], ["cyc_matrix_inverse_cyc_svrg", "cyc_matrix_inverse_hog_svrg"], 3, [.1, .1]);
