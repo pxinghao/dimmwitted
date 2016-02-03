@@ -40,13 +40,13 @@
 
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
 #define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 10
+#define N_EPOCHS 50
 #endif
 
 #ifndef BATCH_SIZE
@@ -88,8 +88,8 @@
 //#define SET_GAMMA 3e-14 //BEST SAGA CYC NH2010
 //#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
 
-#define SET_GAMMA 1e-5 //HOG CYC DBLP
-//#define SET_GAMMA 3e-4 //CYC DBLP
+//#define SET_GAMMA 1e-5 //HOG CYC DBLP
+#define SET_GAMMA 3e-4 //CYC DBLP
 #endif
 
 #ifndef SAGA
@@ -358,7 +358,6 @@ void initialize_model(vector<DataPoint> &sparse_matrix) {
   for (int i = 0; i < N_DIMENSION; i++) randn[i] = rand() % RANGE;
   mat_vect_mult(sparse_matrix, randn, model_init);
 
-
     //Initialize model
   for (int j = 0; j < N_DIMENSION; j++) {
     //model[j][0] = rand() % RANGE;;
@@ -402,6 +401,10 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
   double randn[N_DIMENSION];
   for (int i = 0; i < N_DIMENSION; i++) randn[i] = 0;rand() % RANGE;
   mat_vect_mult(sparse_matrix, randn, B);
+  //add noise
+  for (int i = 0; i < N_DIMENSION; i++) {
+    B[i] += rand() % RANGE;
+  }
 }
 
 vector<DataPoint> get_sparse_matrix() {
