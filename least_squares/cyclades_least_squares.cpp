@@ -25,6 +25,7 @@
 //#define N_DIMENSION 2049
 //#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
 //#define N_DIMENSION 48838
+//#define VERTEX_WEIGHT_FILE "../SVRG/nh2010/nh2010_population.mtx"
 #define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
 #define N_DIMENSION 5425964
 //#define MATRIX_DATA_FILE "ego-gplus/out.ego-gplus"
@@ -40,18 +41,18 @@
 
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 4
 #endif
 
 #define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 50
+#define N_EPOCHS 100
 #endif
 
 #ifndef BATCH_SIZE
-//#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 10000
+#define BATCH_SIZE 1000 //nh2010
+//#define BATCH_SIZE 10000
 #endif
 
 #ifndef HOG
@@ -84,12 +85,19 @@
 
 #ifndef SET_GAMMA
 //NH2010
-//#define SET_GAMMA .2 //BEST SAGA CYC NH2010
 //#define SET_GAMMA 3e-14 //BEST SAGA CYC NH2010
-//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010 32 thread
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010 16 thread
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010 8 thread
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010 4 thread
+//#define SET_GAMMA 3e-14 //BEST SAGA HOG NH2010 1 thread
 
-//#define SET_GAMMA 1e-5 //HOG CYC DBLP
-#define SET_GAMMA 3e-4 //CYC DBLP
+//#define SET_GAMMA 3e-4 //CYC DBLP
+#define SET_GAMMA 1e-5 //HOG DBLP 32 thread
+#define SET_GAMMA 1e-5 //HOG DBLP 16 thread
+#define SET_GAMMA 1e-5 //HOG DBLP 8 thread
+#define SET_GAMMA 1e-5 //HOG DBLP 4 thread
+#define SET_GAMMA 3e-4 //HOG DBLP 1 thread
 #endif
 
 #ifndef SAGA
@@ -398,6 +406,10 @@ vector<DataPoint> get_transpose(vector<DataPoint> &mat) {
 }
 
 void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
+#ifdef VERTEX_WEIGHT_FILE
+  ifstream in(VERTEX_WEIGHT_FILE);
+  for (int i = 0; i < N_DIMENSION; i++) in >> B[i];
+#else  
   double randn[N_DIMENSION];
   for (int i = 0; i < N_DIMENSION; i++) randn[i] = 0;rand() % RANGE;
   mat_vect_mult(sparse_matrix, randn, B);
@@ -405,6 +417,7 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
   for (int i = 0; i < N_DIMENSION; i++) {
     B[i] += rand() % RANGE;
   }
+#endif
 }
 
 vector<DataPoint> get_sparse_matrix() {
