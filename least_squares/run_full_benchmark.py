@@ -530,5 +530,6 @@ def draw_all_graphs(load_previous, epoch_range, batch_size_range, thread_range, 
 # NH2010
 #draw_time_loss_graph(0, 500, [1000], [16], [1], ["cyc_matrix_inverse_cyc_saga2", "cyc_matrix_inverse_cyc_saga", "cyc_matrix_inverse_hog_saga", "cyc_matrix_inverse_hog_saga2"], 1, [1e-5, .1, 1e-5, 2e-5]);
 
-draw_time_loss_graph(0, 100, [1000], [16], [1], ["cyc_least_squares_cyc_saga", "cyc_least_squares_hog_saga", "cyc_least_squares_hog_saga_crimp"], 3, [1e-15, 1e-15, 1e-15]);
+#draw_time_loss_graph(0, 100, [1000], [16], [1], ["cyc_least_squares_cyc_saga", "cyc_least_squares_hog_saga", "cyc_least_squares_hog_saga_crimp"], 3, [1e-15, 1e-15, 1e-15]);
+draw_time_loss_graph(0, 5000, [1000], [16], [1], ["cyc_least_squares_cyc_saga", "cyc_least_squares_hog_saga_crimp"], 1, [3e-14, 1e-14]);
 #draw_time_loss_graph(0, 100, [10000], [16], [1], ["cyc_least_squares_cyc_sgd", "cyc_least_squares_hog_sgd"], 1);

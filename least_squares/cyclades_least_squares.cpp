@@ -23,10 +23,10 @@
 //#define N_DIMENSION 8193
 //#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
 //#define N_DIMENSION 2049
-//#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
-//#define N_DIMENSION 48838
-#define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
-#define N_DIMENSION 5425964
+#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
+#define N_DIMENSION 48838
+//#define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
+//#define N_DIMENSION 5425964
 //#define MATRIX_DATA_FILE "ego-gplus/out.ego-gplus"
 //#define N_DIMENSION 23629
 
@@ -37,14 +37,16 @@
 
 //#define N_DIMENSION 10000
 
+
+
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
-#define RANGE 2
+#define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 5000
 #endif
 
 #ifndef BATCH_SIZE
@@ -82,10 +84,11 @@
 
 #ifndef SET_GAMMA
 //NH2010
+//#define SET_GAMMA .2 //BEST SAGA CYC NH2010
 //#define SET_GAMMA 3e-14 //BEST SAGA CYC NH2010
-//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
+#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
 
-#define SET_GAMMA 2e-5 //HOG CYC DBLP
+//#define SET_GAMMA 2e-5 //HOG CYC DBLP
 //#define SET_GAMM1A 3e-4 //CYC DBLP
 #endif
 
@@ -349,11 +352,17 @@ void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, i
   }
 }
 
-void initialize_model() {
+void initialize_model(vector<DataPoint> &sparse_matrix) {
+
+  double randn[N_DIMENSION], model_init[N_DIMENSION];
+  for (int i = 0; i < N_DIMENSION; i++) randn[i] = rand() % RANGE;
+  mat_vect_mult(sparse_matrix, randn, model_init);
+
 
     //Initialize model
   for (int j = 0; j < N_DIMENSION; j++) {
-    model[j][0] = rand() % RANGE;;
+    //model[j][0] = rand() % RANGE;;
+    model[j][0] = model_init[j];
     bookkeeping[j] = 0;
     sum_gradients[j] = 0;
   }
@@ -390,9 +399,9 @@ vector<DataPoint> get_transpose(vector<DataPoint> &mat) {
 }
 
 void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
-    for (int i = 0; i < N_DIMENSION; i++) {
-      B[i] = rand() % RANGE;
-    }
+  double randn[N_DIMENSION];
+  for (int i = 0; i < N_DIMENSION; i++) randn[i] = 0;rand() % RANGE;
+  mat_vect_mult(sparse_matrix, randn, B);
 }
 
 vector<DataPoint> get_sparse_matrix() {
@@ -446,7 +455,7 @@ vector<DataPoint> get_sparse_matrix_synthetic() {
 
 void cyc_least_squares() {
   vector<DataPoint> points = get_sparse_matrix();
-  initialize_model();
+  initialize_model(points);
   random_shuffle(points.begin(), points.end());
   vector<DataPoint> points_copy(points);
   
@@ -532,7 +541,7 @@ void cyc_least_squares() {
 
 void hog_least_squares() {
   vector<DataPoint> points = get_sparse_matrix();
-  initialize_model();
+  initialize_model(points);
   random_shuffle(points.begin(), points.end());
   Timer overall;
 
