@@ -23,10 +23,10 @@
 //#define N_DIMENSION 8193
 //#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
 //#define N_DIMENSION 2049
-//#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
-//#define N_DIMENSION 48838
-#define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
-#define N_DIMENSION 5425964
+#define MATRIX_DATA_FILE "nh2010/nh2010.mtx"
+#define N_DIMENSION 48838
+//#define MATRIX_DATA_FILE "dblp-author/out.dblp-author"
+//#define N_DIMENSION 5425964
 
 //#define MATRIX_DATA_FILE "youtube-u-growth/out.youtube-u-growth"
 //#define N_DIMENSION 3223589+1
@@ -36,18 +36,18 @@
 //#define N_DIMENSION 10000
 
 #ifndef NTHREAD
-#define NTHREAD 16
+#define NTHREAD 1
 #endif
 
 #define RANGE 2
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5
+#define N_EPOCHS 20
 #endif
 
 #ifndef BATCH_SIZE
-//#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 10000
+#define BATCH_SIZE 1000 //nh2010
+//#define BATCH_SIZE 10000
 #endif
 
 #ifndef HOG
@@ -83,7 +83,7 @@
 //#define START_GAMMA 2e-5 //HOG DIVERGE SVRG
 //#define SET_GAMMA 1e-5 //BEST HOG SVRG
 //#define SET_GAMMA .1 //BEST CYC SVRG
-#define SET_GAMMA .2 //BEST CYC SVRG
+#define SET_GAMMA 1e-1 //BEST CYC SVRG
 
 #endif
 
@@ -217,25 +217,21 @@ double compute_loss(vector<DataPoint> &pts) {
 }
 
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
-
   //Copy model
   //memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
-  for (int i = 0; i < N_DIMENSION; i++) model_tilde[i] = model[i][0];
-  //Reset sum of gradients
-  for (int j = 0; j < N_DIMENSION; j++) {
-    sum_gradient_tilde[j] = 0;
+  #pragma omp parallel for
+  for (int i = 0; i < N_DIMENSION; i++) {
+    model_tilde[i] = model[i][0];
+    sum_gradient_tilde[i] = 0;
+    int n_zeroes = num_zeroes_in_column[i];
+    sum_gradient_tilde[i] += (C * LAMBDA * model_tilde[i] - B[i] / N_DIMENSION) * n_zeroes;
   }
   
-  //Calculate sum of gradient tildes
-  /*double gradient_tilde[N_DIMENSION];
-  for (int i = 0; i < N_DIMENSION; i++) {
-    get_gradient(pts[i], gradient_tilde);
-    for (int j = 0; j < N_DIMENSION; j++) {
-      sum_gradient_tilde[j] += gradient_tilde[j];
-    }
-    }*/
+  double sum_gradient_local[N_DIMENSION][NTHREAD];
+  memset(sum_gradient_local, 0, sizeof(double) * (NTHREAD*N_DIMENSION));
 
   //Calculate sum of gradient tildes
+  #pragma omp parallel for
   for (int i = 0; i < pts.size(); i++) {
     double ai_t_x = 0;
     map<int, double> sparse_row = pts[i].second;
@@ -243,14 +239,16 @@ void calculate_gradient_tilde(vector<DataPoint> &pts) {
       ai_t_x += model_tilde[x.first] * x.second;
     }
     for (auto const & x : sparse_row) {
-      sum_gradient_tilde[x.first] +=  (C * LAMBDA * model_tilde[x.first] - x.second * ai_t_x) - B[x.first] / N_DIMENSION;
+      int thread_id = omp_get_thread_num();
+      sum_gradient_local[x.first][thread_id] += (C * LAMBDA * model_tilde[x.first] - x.second * ai_t_x) - B[x.first] / N_DIMENSION;
     }
   }
-
-  //Sum the rest of the zeroes in the columns
+  
+  #pragma omp parallel for
   for (int i = 0; i < N_DIMENSION; i++) {
-    int n_zeroes = num_zeroes_in_column[i];
-    sum_gradient_tilde[i] += (C * LAMBDA * model_tilde[i] - B[i] / N_DIMENSION) * n_zeroes;
+    for (int j = 0; j < NTHREAD; j++) {
+      sum_gradient_tilde[i] += sum_gradient_local[i][j];
+    }
   }
 }
 
