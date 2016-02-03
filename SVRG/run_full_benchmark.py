@@ -90,13 +90,13 @@ def draw_time_loss_graph(should_load_from_file, epoch_range, batch_size_range, t
         for b in batch_size_range:
             for t in thread_range:
                 for s in sync_range:
-                    for i, c in enumerate(commands):
+                    for ii, c in enumerate(commands):
                         for n in range(n_rep):
                             print("Iteration %d of %d" % (cur_iter, total_iter))
                             cur_iter += 1
                             params =  ["N_EPOCHS="+str(epoch_range), "BATCH_SIZE="+str(b), "NTHREAD="+str(t), "SHOULD_SYNC="+ str(s), "SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH=1"]
                             if gammas != None:
-                                params.append("START_GAMMA="+str(gammas[i]))
+                                params.append("START_GAMMA="+str(gammas[ii]))
                             output = run_command_with_params_and_get_output(c, params)
                             values = [float(x) for x in output]
                             if n == 0:
