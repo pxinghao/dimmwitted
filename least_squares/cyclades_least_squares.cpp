@@ -23,10 +23,10 @@
 //#define N_DIMENSION 8193
 //#define MATRIX_DATA_FILE "delaunay_n11/delaunay_n11.mtx"
 //#define N_DIMENSION 2049
-#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
-#define N_DIMENSION 48838
-//#define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
-//#define N_DIMENSION 5425964
+//#define MATRIX_DATA_FILE "../SVRG/nh2010/nh2010.mtx"
+//#define N_DIMENSION 48838
+#define MATRIX_DATA_FILE "../SVRG/dblp-author/out.dblp-author"
+#define N_DIMENSION 5425964
 //#define MATRIX_DATA_FILE "ego-gplus/out.ego-gplus"
 //#define N_DIMENSION 23629
 
@@ -40,18 +40,18 @@
 
 
 #ifndef NTHREAD
-#define NTHREAD 8
+#define NTHREAD 1
 #endif
 
 #define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 5000
+#define N_EPOCHS 10
 #endif
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 1000 //nh2010
-#define BATCH_SIZE 1000
+#define BATCH_SIZE 10000
 #endif
 
 #ifndef HOG
@@ -86,10 +86,10 @@
 //NH2010
 //#define SET_GAMMA .2 //BEST SAGA CYC NH2010
 //#define SET_GAMMA 3e-14 //BEST SAGA CYC NH2010
-#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
+//#define SET_GAMMA 1e-14 //BEST SAGA HOG NH2010
 
-//#define SET_GAMMA 2e-5 //HOG CYC DBLP
-//#define SET_GAMM1A 3e-4 //CYC DBLP
+#define SET_GAMMA 1e-5 //HOG CYC DBLP
+//#define SET_GAMMA 3e-4 //CYC DBLP
 #endif
 
 #ifndef SAGA
