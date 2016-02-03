@@ -36,13 +36,13 @@
 //#define N_DIMENSION 10000
 
 #ifndef NTHREAD
-#define NTHREAD 1
+#define NTHREAD 8
 #endif
 
-#define RANGE 2
+#define RANGE 100
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 20
+#define N_EPOCHS 100
 #endif
 
 #ifndef BATCH_SIZE
@@ -83,7 +83,7 @@
 //#define START_GAMMA 2e-5 //HOG DIVERGE SVRG
 //#define SET_GAMMA 1e-5 //BEST HOG SVRG
 //#define SET_GAMMA .1 //BEST CYC SVRG
-#define SET_GAMMA 1e-1 //BEST CYC SVRG
+#define SET_GAMMA .1 //BEST CYC SVRG
 
 #endif
 
@@ -136,6 +136,10 @@ void pin_to_core(size_t core) {
   CPU_ZERO(&cpuset);
   CPU_SET(core, &cpuset);
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+}
+
+void omp_pin_to_core(int thread) {
+  pin_to_core(thread);
 }
 
 void get_gradient(DataPoint &p, double *out) {
@@ -219,7 +223,7 @@ double compute_loss(vector<DataPoint> &pts) {
 void calculate_gradient_tilde(vector<DataPoint> &pts) {
   //Copy model
   //memcpy(model_tilde, model, sizeof(double) * N_DIMENSION);
-  #pragma omp parallel for
+
   for (int i = 0; i < N_DIMENSION; i++) {
     model_tilde[i] = model[i][0];
     sum_gradient_tilde[i] = 0;
@@ -242,9 +246,8 @@ void calculate_gradient_tilde(vector<DataPoint> &pts) {
       int thread_id = omp_get_thread_num();
       sum_gradient_local[x.first][thread_id] += (C * LAMBDA * model_tilde[x.first] - x.second * ai_t_x) - B[x.first] / N_DIMENSION;
     }
-  }
+  }   
   
-  #pragma omp parallel for
   for (int i = 0; i < N_DIMENSION; i++) {
     for (int j = 0; j < NTHREAD; j++) {
       sum_gradient_tilde[i] += sum_gradient_local[i][j];
@@ -531,7 +534,7 @@ void initialize_matrix_data(vector<DataPoint> &sparse_matrix) {
     for (int i = 0; i < N_DIMENSION; i++) {
       x_k[i] = rand() % RANGE;
     }
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < 10; i++) {
       mat_vect_mult(sparse_matrix, x_k, x_k_prime);
       mat_vect_mult(transpose, x_k_prime, x_k);
 
@@ -626,6 +629,10 @@ void cyc_matrix_inverse() {
   random_shuffle(points.begin(), points.end());
   vector<DataPoint> points_copy(points);
   
+  //pin to core omp
+  #pragma omp parallel for
+  for (int i = 0; i < NTHREAD; i++) omp_pin_to_core(i);
+
   Timer overall;
 
   int n_batches = (int)ceil((points.size() / (double)BATCH_SIZE));
@@ -673,6 +680,7 @@ void cyc_matrix_inverse() {
 
   for (int i = 0; i < N_EPOCHS; i++) {
     calculate_gradient_tilde(points);
+    //Don't count calculating the first model gradient
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
       cout << compute_loss(points) << " " << overall.elapsed()-copy_time << " " << gradient_time.elapsed()-copy_time << endl;
@@ -709,6 +717,11 @@ void hog_matrix_inverse() {
   vector<DataPoint> points = get_sparse_matrix();
   initialize_model();
   random_shuffle(points.begin(), points.end());
+
+  //pin to core omp
+  #pragma omp parallel for
+  for (int i = 0; i < NTHREAD; i++) omp_pin_to_core(i);
+
   Timer overall;
 
   //Hogwild access pattern construction
@@ -743,10 +756,10 @@ void hog_matrix_inverse() {
   //Divide to threads
   float copy_time = 0;
   Timer gradient_time;
+
   for (int i = 0; i < N_EPOCHS; i++) {
     
     calculate_gradient_tilde(points);
-
     if (SHOULD_PRINT_LOSS_TIME_EVERY_EPOCH) {
       Timer copy_timer;
       //  copy_model_to_records(i, overall.elapsed()-copy_time, gradient_time.elapsed()-copy_time);
