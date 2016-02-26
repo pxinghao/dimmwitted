@@ -16,29 +16,33 @@
 #include <mutex> 
 #include <omp.h>
 
-#define WORD_EMBEDDINGS_FILE "small_graph"
+#define WORD_EMBEDDINGS_FILE "/run/sparse_graph"
 //#define N_NODES 628
 //#define N_DATAPOINTS 5607
 //#define N_NODES 3822
 //#define N_DATAPOINTS 80821
 //#define N_NODES 213271
 //#define N_DATAPOINTS 20207156
-#define N_NODES 16774
-#define N_DATAPOINTS 622941
+//#define N_NODES 16774
+//#define N_DATAPOINTS 622941
 //#define N_NODES 105
 //#define N_DATAPOINTS 1096
+//HUGE GRAPH
+#define N_NODES 1468307
+#define N_DATAPOINTS 140196115
 
 #ifndef NTHREAD
 #define NTHREAD 8
 #endif
 
 #ifndef N_EPOCHS
-#define N_EPOCHS 100
+#define N_EPOCHS 200
 #endif 
 
 #ifndef BATCH_SIZE
 //#define BATCH_SIZE 4250 //full 80 mb
-#define BATCH_SIZE 520
+#define BATCH_SIZE 6000 //full 1 GB
+//#define BATCH_SIZE 520
 //#define BATCH_SIZE 2000 //1/10 of 80 mb SGD
 //#define BATCH_SIZE 490
 #endif
@@ -64,20 +68,20 @@
 #endif
 
 #ifndef K
-#define K 30
+#define K 100
 #endif
 #define K_TO_CACHELINE ((K / 8 + 1) * 8)
 
 #ifndef SAGA
-#define SAGA 1
+#define SAGA 0
 #endif
 
 #ifndef START_GAMMA
 //#define START_GAMMA 2.3e-4//3.42e-5
-//#define START_GAMMA 1e-6 // SGD CYC/HOG
+#define START_GAMMA 1e-10 // SGD CYC/HOG
 //#define START_GAMMA 1e-7 // SAGA CYC
 //#define START_GAMMA 3e-11 // SAGA HOG
-#define START_GAMMA 1e-10 //SAGA HOG DIVERGE
+//#define START_GAMMA 1e-10 //SAGA HOG DIVERGE
 //#define START_GAMMA 1e-10 // SG
 
 //#define START_GAMMA 1e-4 //Test
@@ -100,6 +104,7 @@ double *C_sum_mult2[NTHREAD];
 double ** prev_gradients[NTHREAD];
 double ** model, **sum_gradients;
 double **model_records[N_EPOCHS];
+int *tree_thread[NTHREAD];
 int bookkeeping[N_NODES];
 
 double gradient_times[N_EPOCHS], overall_times[N_EPOCHS];
@@ -246,8 +251,8 @@ void do_cyclades_gradient_descent_with_points(DataPoint * access_pattern, vector
       double diff_x = update_order - bookkeeping[x] - 1;
       double diff_y = update_order - bookkeeping[y] - 1;
       
-      if (diff_x <= 0) diff_x = 0;
-      if (diff_y <= 0) diff_y = 0;
+      //if (diff_x <= 0) diff_x = 0;
+      //if (diff_y <= 0) diff_y = 0;
 
       if (SAGA) {
 	for (int j = 0; j < K; j++) {
@@ -363,6 +368,11 @@ void distribute_ccs(map<int, vector<int> > &ccs, vector<DataPoint *> &access_pat
   }
   avg_cc_size /= (double)ccs.size();
 
+  for (int i = 0; i < NTHREAD; i++) {
+    //cout << total_size_needed[i] << " ";
+  }
+  //cout << endl;
+
   //Allocate memory
   int index_count[NTHREAD];
   int max_load = 0;
@@ -438,8 +448,9 @@ int union_find(int a, int *p) {
 
 void compute_CC_thread(map<int, vector<int> > &CCs, vector<DataPoint> &points, int start, int end, int thread_id) {
   pin_to_core(thread_id);
-  int tree[end-start + N_NODES];
+  //int tree[end-start + N_NODES];
   //int *tree =(int *) malloc(sizeof(int) * (end-start+N_NODES));  
+  int *tree = tree_thread[thread_id];
 
   for (long long int i = 0; i < end-start + N_NODES; i++) 
     tree[i] = i;
@@ -567,15 +578,15 @@ void cyc_word_embeddings() {
   }
 
   for (int i = 0; i < NTHREAD; i++) {
-    prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
+    //prev_gradients[i] = (double **)malloc(sizeof(double *) * thread_load_balance[i]);
     C_sum_mult[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
     C_sum_mult2[i] = (double *)malloc(sizeof(double) * thread_load_balance[i]);
     for (int j = 0; j < thread_load_balance[i]; j++) {
       C_sum_mult[i][j] = 0;
       C_sum_mult2[i][j] = 0;
-      prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
+      //prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
-	prev_gradients[i][j][k] = 0;
+	//prev_gradients[i][j][k] = 0;
       }
     }
   }
@@ -610,7 +621,7 @@ void cyc_word_embeddings() {
 
     //Optimize C
     double C_A = 0, C_B = 0;
-#pragma omp parallel for reduction(+:C_A,C_B)
+    #pragma omp parallel for reduction(+:C_A,C_B)
     for (int t = 0; t < NTHREAD; t++) {
       for (int d = 0; d < order[t].size(); d++) {
 	C_A += C_sum_mult[t][d];
@@ -664,15 +675,15 @@ void hog_word_embeddings() {
   }
 
   for (int i = 0; i < NTHREAD; i++) {
-    prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
+    //prev_gradients[i] = (double **)malloc(sizeof(double *) * order[i].size());
     C_sum_mult[i] = (double *)malloc(sizeof(double) * order[i].size());
     C_sum_mult2[i] = (double *)malloc(sizeof(double) * order[i].size());
     for (int j = 0; j < order[i].size(); j++) {
       C_sum_mult[i][j] = 0;
       C_sum_mult2[i][j] = 0;
-      prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
+      //prev_gradients[i][j] = (double *)malloc(sizeof(double) * 2*K_TO_CACHELINE);
       for (int k = 0; k < 2*K_TO_CACHELINE; k++) {
-	prev_gradients[i][j][k] = 0;
+	//prev_gradients[i][j][k] = 0;
       }
     }
   }
@@ -734,17 +745,22 @@ int main(void) {
   std::cout << std::setprecision(10);
   pin_to_core(0);
 
-  sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
+  //Allocate memory for tree for CC per thread
+  for (int i = 0; i < NTHREAD; i++) {
+    tree_thread[i] = (int *)malloc(sizeof(int) * (BATCH_SIZE + N_NODES));
+  }
+
+  //sum_gradients = (double **)malloc(sizeof(double *) * N_NODES);
   model = (double **)malloc(sizeof(double *) * N_NODES);
   for (int i = 0; i < N_NODES; i++) {
-    sum_gradients[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
+    //sum_gradients[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
     model[i] = (double *)malloc(sizeof(double) * K_TO_CACHELINE);
   }
 
   for (int i = 0; i < N_NODES; i++) {
     bookkeeping[i] = 0;
     for (int j = 0; j < K_TO_CACHELINE; j++) {
-      sum_gradients[i][j] = 0;
+      //sum_gradients[i][j] = 0;
     }
   }
 

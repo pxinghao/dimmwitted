@@ -11,7 +11,7 @@ with open(sys.argv[1], 'r') as corpus:
     #text = text[:1000000]
     #text = text[:10000000]
     #text = text[:len(text)/100000]
-    text = text[:1000]
+    #text = text[:1000]
     
     words_list = list(set(text.split()))
     word_to_id = {}
@@ -26,13 +26,16 @@ with open(sys.argv[1], 'r') as corpus:
     # Construct graph
     g = {}
     words = text.strip().split(" ")
-    lines = [words[i:i+DISTANCE] for i in range(len(words))]
-    for line in lines:
-        if len(line) < DISTANCE:
+    #lines = [words[i:i+DISTANCE] for i in range(len(words))]
+    #for line in lines:
+    for i in range(len(words)):
+        if i+DISTANCE >= len(words):
             continue
         #print("LINE: ", line)
-        first_word = line[0]
-        for other_word in line:
+        first_word = words[i]
+        #for other_word in line:
+        for k in range(DISTANCE):
+            other_word = words[i+k]
             if other_word == first_word:
                 continue
             a, b = tuple(sorted([first_word, other_word]))
